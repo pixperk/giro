@@ -10,6 +10,8 @@ var (
 	ErrNoPostings         = errors.New("transaction has no postings")
 	ErrLedgerNotFound     = errors.New("ledger not found")
 	ErrDuplicateReference = errors.New("reference already used")
+	ErrNotFound           = errors.New("not found")
+	ErrInvalidCursor      = errors.New("invalid cursor")
 )
 
 // the balance check failed. carries enough to tell the caller which account
