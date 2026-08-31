@@ -1,0 +1,24 @@
+# build output
+/giro
+/bin/
+*.exe
+
+# test and profiling artifacts
+*.test
+*.out
+coverage.html
+
+# local config and secrets, the database url will live here
+.env
+.env.*
+!.env.example
+
+# editors and os
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# go workspace files, local to a machine
+go.work
+go.work.sum
