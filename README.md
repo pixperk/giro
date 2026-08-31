@@ -86,13 +86,15 @@ the running service.
 
 ```
 POST   /v1/ledgers/{ledger}                          create a ledger
-POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header
+GET    /v1/ledgers/{ledger}
+POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header, ?dryRun=true
 GET    /v1/ledgers/{ledger}/transactions             list, cursor paginated
 GET    /v1/ledgers/{ledger}/transactions/{id}
 POST   /v1/ledgers/{ledger}/transactions/{id}/revert
 POST   /v1/ledgers/{ledger}/transactions/{id}/metadata
 DELETE /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}
-GET    /v1/ledgers/{ledger}/accounts/{address}       ?expand=volumes
+GET    /v1/ledgers/{ledger}/accounts/{address}       ?expand=volumes,effectiveVolumes&at=
+GET    /v1/ledgers/{ledger}/accounts/{address}/balances   ?at=
 POST   /v1/ledgers/{ledger}/accounts/{address}/metadata
 DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}
 GET    /v1/ledgers/{ledger}/accounts/{address}/balances
@@ -103,6 +105,10 @@ GET    /v1/ledgers/{ledger}/logs                     the audit trail
 `GET /v1/ledgers/{ledger}/balances` with no prefix covers the whole ledger,
 `world` included, so it is always exactly zero for every asset. That is the
 conservation invariant, readable over http.
+
+`?at=` asks what was true on an effective date rather than what is true now.
+The two differ whenever a transaction has been backdated, which for anything
+taking settlement files from the outside world is most of the time.
 
 ---
 
@@ -532,6 +538,58 @@ on.
 is correcting a data entry error rather than undoing a real movement.
 
 
+### D26. Effective volumes are maintained on write and verified by replay
+
+Every move carries two snapshots. `pcv` follows insertion order and is written
+once, recording what the ledger believed at the time. `pcev` follows effective
+date order, which is a different sequence whenever a transaction is backdated,
+and answers what was actually true on a date.
+
+`pcev` is maintained on write: a new move reads the effective balance as of its
+own timestamp, accumulates from there, and shifts every move already sitting
+later in effective order by its delta. Historical balance is then an index seek
+rather than a sum over an account's whole history.
+
+The alternative is computing it on read, which is trivially correct and grows
+with the account's age. Maintaining a cache is faster and can be wrong, so the
+slow version exists too, as `VerifyEffectiveVolumes`: it walks every account in
+effective order, accumulates, and compares against what is stored. Randomised
+sequences of backdated transactions are checked against it.
+
+That is the trade. The optimisation is only defensible because something
+independent checks it, and an optimisation nothing checks is a guess.
+
+The fix up is written in Go rather than as a database trigger, for the same
+reason: logic in PL/pgSQL is hard to test and invisible to the type system.
+
+### D27. The log is verified against the projection, not just for tamper evidence
+
+`VerifyProjection` replays the log and requires that `accounts_volumes` is
+exactly what it produces, that every transaction was logged, and that the log
+describes no transaction the table lacks.
+
+This is what makes "the log is the source of truth" a fact rather than a
+statement of intent. It is also the only check that would catch a commit path
+writing one thing and logging another: every other assertion reads the
+projection, so a consistent lie passes all of them. Reversing the postings in
+the logged copy leaves conservation, every balance and the hash chain intact,
+and only this notices.
+
+### D28. Dry run is the real path, rolled back
+
+`?dryRun=true` takes the locks, checks the balances against live data, writes
+the volumes and moves, and then rolls back instead of committing.
+
+It is not a simulation, so it cannot drift from what a commit does. A
+transaction that would be rejected is rejected here with the same status, which
+is the entire point of previewing.
+
+Nothing is consumed: no id is allocated, no idempotency key is claimed, no log
+entry survives, and the account rows materialised to take locks disappear with
+everything else. The id on the response is what it would have been, not a
+reservation. It answers 200 rather than 201, because nothing was created.
+
+
 ## Layout
 
 ```
@@ -542,6 +600,23 @@ internal/storage/    the commit path, the log chain, queries. no http
 internal/api/        handlers, error mapping, the docs page
 internal/migrate/    migration runner and generator
 migrations/          numbered sql, embedded into the binary
+```
+
+Inside `internal/storage`, one file per concern rather than one large one:
+
+```
+store.go       the type, scoped to a ledger
+commit.go      the retry loop and the sequence inside one database transaction
+allocate.go    id allocation and log appending, under one row lock
+rows.go        the individual inserts a commit performs
+moves.go       moves, and maintaining the two volume histories
+retry.go       which errors are worth retrying, and for how long
+volumes.go     locking and applying volume deltas
+revert.go      compensating transactions
+metadata.go    merge and delete, with the no-op guard
+read.go        queries and keyset pagination
+effective.go   reads by effective date
+verify.go      the invariant checks
 ```
 
 Each layer knows nothing about the one above it. The domain has no sql, storage
