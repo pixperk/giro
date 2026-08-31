@@ -22,7 +22,25 @@ func (s *Server) createLedger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toAPILedger(l))
 }
 
+func (s *Server) getLedger(w http.ResponseWriter, r *http.Request) {
+	l, err := s.store(r.PathValue("ledger")).GetLedger(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPILedger(l))
+}
+
 func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	dryRun, ok := boolParam(w, params, "dryRun")
+	if !ok {
+		return
+	}
+
 	var body CreateTransactionRequest
 	if !decodeJSON(w, r, &body) {
 		return
@@ -32,6 +50,7 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 		// the header rather than the body, so it is not part of the hashed
 		// inputs: the same postings under a new key must hash the same.
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		DryRun:         dryRun,
 	}
 	if body.Timestamp != nil {
 		opts.Timestamp = *body.Timestamp
@@ -49,7 +68,12 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toAPITransaction(tx))
+	// 200 rather than 201: a dry run created nothing
+	status := http.StatusCreated
+	if dryRun {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, toAPITransaction(tx))
 }
 
 func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +270,25 @@ func query(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
 		return nil, false
 	}
 	return values, true
+}
+
+// absent means false. only the values a caller could reasonably mean are
+// accepted, so a typo is an error rather than a silent false.
+func boolParam(w http.ResponseWriter, q url.Values, name string) (bool, bool) {
+	switch q.Get(name) {
+	case "":
+		return false, true
+	case "true", "1":
+		return true, true
+	case "false", "0":
+		return false, true
+	default:
+		writeJSON(w, http.StatusBadRequest, Error{
+			Code:    VALIDATION,
+			Message: name + " must be true or false",
+		})
+		return false, false
+	}
 }
 
 // absent means zero, which the storage layer reads as its default. a present

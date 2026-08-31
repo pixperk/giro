@@ -648,3 +648,119 @@ func TestRecomputingATamperedHashStillBreaksTheChain(t *testing.T) {
 		t.Errorf("the break should surface at entry 3, got: %v", err)
 	}
 }
+
+// a dry run runs the real path and then rolls back, so it cannot drift from
+// what a real commit would do.
+func TestDryRunChangesNothing(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 10000)
+
+	tx, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)},
+	}, CommitOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// it reports what would have happened
+	if tx.ID != 2 {
+		t.Errorf("id = %d, want 2: the id it would have taken", tx.ID)
+	}
+	if got := tx.PostCommitVolumes["users:alice"]["USD/2"].Balance(); got.Cmp(n(7000)) != 0 {
+		t.Errorf("projected alice = %s, want 7000", got)
+	}
+
+	// and nothing survived
+	if got := balance(t, ctx, pool, "users:alice", "USD/2"); got.Cmp(n(10000)) != 0 {
+		t.Errorf("alice = %s, want 10000: a dry run must not move money", got)
+	}
+	// bob has no row at all, not a zero one: the row materialised to take the
+	// lock was rolled back with everything else
+	bob, err := s.GetBalances(ctx, "users:bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bob) != 0 {
+		t.Errorf("bob = %v, want no balances at all", bob)
+	}
+	if got := logCount(t, ctx, pool); got != 1 {
+		t.Errorf("%d log entries, want 1", got)
+	}
+
+	var moves int
+	pool.QueryRow(ctx, "select count(*) from moves where ledger='main' and tx_id=2").Scan(&moves)
+	if moves != 0 {
+		t.Errorf("%d moves survived a dry run", moves)
+	}
+	assertConserved(t, ctx, pool)
+}
+
+// the id was allocated and rolled back, so the next real transaction takes it.
+func TestDryRunConsumesNoID(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 10000)
+
+	for range 3 {
+		if _, err := s.CommitTransaction(ctx, ledger.Postings{
+			{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(1)},
+		}, CommitOptions{DryRun: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	real, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(1)},
+	}, CommitOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if real.ID != 2 {
+		t.Errorf("id = %d, want 2: three dry runs must not burn ids", real.ID)
+	}
+	if _, err := s.VerifyProjection(ctx); err != nil {
+		t.Errorf("projection: %v", err)
+	}
+	_ = pool
+}
+
+// a dry run of something that would be rejected is rejected, which is the
+// whole point of running the real path.
+func TestDryRunRejectsWhatACommitWouldReject(t *testing.T) {
+	ctx, s, _ := testStore(t)
+	fund(t, ctx, s, "users:alice", 100)
+
+	_, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(500)},
+	}, CommitOptions{DryRun: true})
+
+	var insufficient *InsufficientFundsError
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("err = %v, want InsufficientFundsError", err)
+	}
+}
+
+// a dry run must not claim a key, or the real request that follows would be
+// answered with a transaction that does not exist.
+func TestDryRunDoesNotClaimAnIdempotencyKey(t *testing.T) {
+	ctx, s, pool := testStore(t)
+
+	p := ledger.Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(100)}}
+	opts := CommitOptions{IdempotencyKey: "req-1"}
+
+	dry := opts
+	dry.DryRun = true
+	if _, err := s.CommitTransaction(ctx, p, dry); err != nil {
+		t.Fatal(err)
+	}
+
+	real, err := s.CommitTransaction(ctx, p, opts)
+	if err != nil {
+		t.Fatalf("the real request after a dry run failed: %v", err)
+	}
+	if got := balance(t, ctx, pool, "users:alice", "USD/2"); got.Cmp(n(100)) != 0 {
+		t.Errorf("alice = %s, want 100: the real commit must have happened", got)
+	}
+	if real.ID != 1 {
+		t.Errorf("id = %d, want 1", real.ID)
+	}
+}

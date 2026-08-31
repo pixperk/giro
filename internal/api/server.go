@@ -29,6 +29,7 @@ func NewServer(store func(ledger string) *storage.Store) *Server {
 // comparable, which is what routes_test.go checks.
 func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}", s.createLedger)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}", s.getLedger)
 
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions", s.createTransaction)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions", s.listTransactions)

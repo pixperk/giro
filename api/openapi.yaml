@@ -47,6 +47,18 @@ paths:
   /v1/ledgers/{ledger}:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"
+    get:
+      tags: [ledgers]
+      summary: Read a ledger
+      operationId: getLedger
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
     post:
       tags: [ledgers]
       summary: Create a ledger
@@ -100,6 +112,22 @@ paths:
         a transaction.
       operationId: createTransaction
       parameters:
+        - name: dryRun
+          in: query
+          description: |
+            Run the whole commit path and then roll back, returning what would
+            have happened.
+
+            This is the real path rather than a simulation, so it cannot drift
+            from a real commit: the locks are taken, the balances are checked
+            against live data, and a transaction that would be rejected is
+            rejected here too, with the same status.
+
+            Nothing is consumed. No id is allocated and no idempotency key is
+            claimed, so the id on the response is what it would have been rather
+            than a reservation. Responds 200 rather than 201, because nothing
+            was created.
+          schema: { type: boolean, default: false }
         - name: Idempotency-Key
           in: header
           description: |
@@ -116,6 +144,11 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CreateTransactionRequest" }
       responses:
+        "200":
+          description: What a dry run would have done. Nothing was committed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
         "201":
           description: Committed, or replayed from an earlier identical request.
           content:

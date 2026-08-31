@@ -29,6 +29,19 @@ type CommitOptions struct {
 	// like a request that never arrived, so every write endpoint is eventually
 	// called twice.
 	IdempotencyKey string
+
+	// run the whole commit path and then roll back, returning what would have
+	// happened.
+	//
+	// this is the real path rather than a simulation, so it cannot drift from
+	// what a real commit does: the locks are taken, the balances are checked
+	// against live data, the volumes and moves are written. only the COMMIT is
+	// replaced by a ROLLBACK.
+	//
+	// nothing is consumed. no id is allocated, no idempotency key is claimed,
+	// no log entry survives. the id on the returned transaction is what it
+	// would have been, not a reservation.
+	DryRun bool
 }
 
 // postgres can still deadlock through index and foreign key locks that sorted
@@ -115,6 +128,12 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 		if err := s.beforeCommit(attempt); err != nil {
 			return nil, err
 		}
+	}
+
+	if opts.DryRun {
+		// the deferred rollback undoes everything above, including the id
+		// allocation and the zero volume rows created while taking locks
+		return transaction, nil
 	}
 
 	if err := tx.Commit(ctx); err != nil {

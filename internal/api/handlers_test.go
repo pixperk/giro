@@ -739,3 +739,106 @@ func TestBadEffectiveDateIsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestGetLedgerEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	rec := do(t, s, http.MethodGet, base, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if got := decode[Ledger](t, rec); got.Name != "demo" || got.AddedAt.IsZero() {
+		t.Errorf("got %+v", got)
+	}
+
+	missing := do(t, s, http.MethodGet, "/v1/ledgers/absent", nil)
+	if missing.Code != http.StatusNotFound {
+		t.Errorf("missing ledger = %d, want 404", missing.Code)
+	}
+	if code := decode[Error](t, missing).Code; code != NOTFOUND {
+		t.Errorf("code = %s", code)
+	}
+}
+
+func TestDryRunOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 10000)
+
+	body := map[string]any{
+		"postings": []map[string]any{posting("users:alice", "users:bob", "USD/2", 3000)},
+	}
+
+	rec := do(t, s, http.MethodPost, base+"/transactions?dryRun=true", body)
+	// 200 and not 201, because nothing was created
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	preview := decode[Transaction](t, rec)
+	if preview.PostCommitVolumes == nil {
+		t.Fatal("a preview with no projected volumes is not much use")
+	}
+	if got := (*preview.PostCommitVolumes)["users:alice"]["USD/2"]; got.Input.Cmp(big.NewInt(10000)) != 0 {
+		t.Errorf("projected alice input = %s, want 10000", got.Input)
+	}
+
+	// nothing moved
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/users:alice/balances", nil))
+	if balances["USD/2"].Cmp(big.NewInt(10000)) != 0 {
+		t.Errorf("alice = %s, want 10000", balances["USD/2"])
+	}
+	if len(decode[LogPage](t, do(t, s, http.MethodGet, base+"/logs", nil)).Items) != 1 {
+		t.Error("a dry run wrote a log entry")
+	}
+
+	// and the same request for real does create
+	real := do(t, s, http.MethodPost, base+"/transactions", body)
+	if real.Code != http.StatusCreated {
+		t.Fatalf("real commit = %d", real.Code)
+	}
+	if decode[Transaction](t, real).Id != preview.Id {
+		t.Error("the preview predicted a different id than the commit took")
+	}
+}
+
+// a dry run of something that would be rejected must be rejected the same way,
+// which is the point of running the real path.
+func TestDryRunReportsRejectionsHonestly(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 100)
+
+	rec := do(t, s, http.MethodPost, base+"/transactions?dryRun=true", map[string]any{
+		"postings": []map[string]any{posting("users:alice", "users:bob", "USD/2", 500)},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	if code := decode[Error](t, rec).Code; code != INSUFFICIENTFUNDS {
+		t.Errorf("code = %s", code)
+	}
+}
+
+func TestDryRunParameterIsValidated(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	for _, value := range []string{"yes", "maybe", "1.0"} {
+		rec := do(t, s, http.MethodPost, base+"/transactions?dryRun="+value, map[string]any{
+			"postings": []map[string]any{posting("world", "a", "USD/2", 1)},
+		})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("dryRun=%s gave %d, want 400", value, rec.Code)
+		}
+	}
+	// the values a caller could reasonably mean are accepted
+	for _, value := range []string{"true", "1", "false", "0"} {
+		rec := do(t, s, http.MethodPost, base+"/transactions?dryRun="+value, map[string]any{
+			"postings": []map[string]any{posting("world", "a", "USD/2", 1)},
+		})
+		if rec.Code == http.StatusBadRequest {
+			t.Errorf("dryRun=%s was rejected", value)
+		}
+	}
+}

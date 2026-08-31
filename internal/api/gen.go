@@ -366,6 +366,20 @@ type ListTransactionsParams struct {
 
 // CreateTransactionParams defines parameters for CreateTransaction.
 type CreateTransactionParams struct {
+	// DryRun Run the whole commit path and then roll back, returning what would
+	// have happened.
+	//
+	// This is the real path rather than a simulation, so it cannot drift
+	// from a real commit: the locks are taken, the balances are checked
+	// against live data, and a transaction that would be rejected is
+	// rejected here too, with the same status.
+	//
+	// Nothing is consumed. No id is allocated and no idempotency key is
+	// claimed, so the id on the response is what it would have been rather
+	// than a reservation. Responds 200 rather than 201, because nothing
+	// was created.
+	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
+
 	// IdempotencyKey Replaying this key returns the original transaction rather than
 	// creating a second one.
 	//
