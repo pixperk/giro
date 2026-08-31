@@ -65,9 +65,18 @@ type RevertedTransactionPayload struct {
 	Transaction           *Transaction `json:"transaction"`
 }
 
-// RevertsKey marks a reversal with the id of the transaction it undoes, so the
-// pair can be found from either side without a dedicated column.
-const RevertsKey = "giro/reverts"
+// keys the ledger writes into metadata itself. the giro/ prefix is reserved,
+// so a caller's own keys can never collide with them.
+const (
+	// marks a reversal with the id of the transaction it undoes, so the pair
+	// can be found from either side without a dedicated column.
+	RevertsKey = "giro/reverts"
+
+	// marks every transaction in a batch with that batch's input hash, which
+	// is what lets a replayed idempotency key find all of them. the unique
+	// index allows the key itself on only one log entry.
+	BatchKey = "giro/batch"
+)
 
 // ChainHash covers the previous entry's hash as well as this entry's bytes, so
 // editing any historical entry invalidates every hash after it. hashing each

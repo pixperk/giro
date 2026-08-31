@@ -55,7 +55,8 @@ func classify(err error) (status int, code ErrorCode, message string) {
 		errors.Is(err, ledger.ErrTooManyMetadataKeys),
 		errors.Is(err, ledger.ErrMetadataKeyTooLong),
 		errors.Is(err, ledger.ErrMetadataValueTooLong),
-		errors.Is(err, ledger.ErrInvalidSourceAddress):
+		errors.Is(err, ledger.ErrInvalidSourceAddress),
+		errors.Is(err, storage.ErrBatchTooLarge):
 		return http.StatusBadRequest, VALIDATION, err.Error()
 
 	default:

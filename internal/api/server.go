@@ -33,6 +33,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions", s.createTransaction)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions", s.listTransactions)
+	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions/bulk", s.commitBatch)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions/{id}", s.getTransaction)
 
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions/{id}/revert", s.revertTransaction)

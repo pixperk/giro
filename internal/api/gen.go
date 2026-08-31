@@ -102,6 +102,16 @@ type Amount = *big.Int
 // Example: {"USD/2":7500}
 type Balances map[string]Amount
 
+// BatchRequest defines model for BatchRequest.
+type BatchRequest struct {
+	Transactions []CreateTransactionRequest `json:"transactions"`
+}
+
+// BatchResponse defines model for BatchResponse.
+type BatchResponse struct {
+	Transactions []Transaction `json:"transactions"`
+}
+
 // CreateTransactionRequest defines model for CreateTransactionRequest.
 type CreateTransactionRequest struct {
 	// Metadata Opaque to the ledger. Never interpreted, only stored.
@@ -437,11 +447,24 @@ type CreateTransactionParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// CommitBatchParams defines parameters for CommitBatch.
+type CommitBatchParams struct {
+	// DryRun Run the whole batch and roll back, returning what would have happened.
+	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
+
+	// IdempotencyKey Covers the whole batch. Replaying it returns the transactions the
+	// first attempt created rather than committing them again.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // SetAccountMetadataJSONRequestBody defines body for SetAccountMetadata for application/json ContentType.
 type SetAccountMetadataJSONRequestBody = Metadata
 
 // CreateTransactionJSONRequestBody defines body for CreateTransaction for application/json ContentType.
 type CreateTransactionJSONRequestBody = CreateTransactionRequest
+
+// CommitBatchJSONRequestBody defines body for CommitBatch for application/json ContentType.
+type CommitBatchJSONRequestBody = BatchRequest
 
 // SetTransactionMetadataJSONRequestBody defines body for SetTransactionMetadata for application/json ContentType.
 type SetTransactionMetadataJSONRequestBody = Metadata

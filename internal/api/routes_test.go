@@ -19,7 +19,7 @@ func TestEveryDocumentedPathIsRouted(t *testing.T) {
 	s := newTestServer(t)
 
 	operations := specOperations(t)
-	if len(operations) < 15 {
+	if len(operations) < 16 {
 		t.Fatalf("only found %d operations in the spec, the scanner is probably broken", len(operations))
 	}
 
@@ -102,6 +102,7 @@ func registeredRoutes() []string {
 		"GET /v1/ledgers/{ledger}",
 		"POST /v1/ledgers/{ledger}/transactions",
 		"GET /v1/ledgers/{ledger}/transactions",
+		"POST /v1/ledgers/{ledger}/transactions/bulk",
 		"GET /v1/ledgers/{ledger}/transactions/{id}",
 		"POST /v1/ledgers/{ledger}/transactions/{id}/revert",
 		"POST /v1/ledgers/{ledger}/transactions/{id}/metadata",

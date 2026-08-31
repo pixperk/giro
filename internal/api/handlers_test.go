@@ -942,3 +942,123 @@ func TestStatementOfAnUnusedAccountIsEmpty(t *testing.T) {
 		t.Errorf("%d rows", len(page.Items))
 	}
 }
+
+func TestBulkEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	body := map[string]any{"transactions": []map[string]any{
+		{"postings": []map[string]any{posting("world", "treasury", "USD/2", 1000)}},
+		{"postings": []map[string]any{posting("treasury", "alice", "USD/2", 600)}},
+		{"postings": []map[string]any{posting("treasury", "bob", "USD/2", 400)}},
+	}}
+
+	rec := do(t, s, http.MethodPost, base+"/transactions/bulk", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	out := decode[BatchResponse](t, rec)
+	if len(out.Transactions) != 3 {
+		t.Fatalf("%d transactions, want 3", len(out.Transactions))
+	}
+	// items see each other, so treasury nets to zero
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/treasury/balances", nil))
+	if balances["USD/2"].Sign() != 0 {
+		t.Errorf("treasury = %s, want 0", balances["USD/2"])
+	}
+}
+
+// all or nothing, and the error says which item.
+func TestBulkIsAtomicOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "alice", 500)
+
+	rec := do(t, s, http.MethodPost, base+"/transactions/bulk", map[string]any{
+		"transactions": []map[string]any{
+			{"postings": []map[string]any{posting("alice", "bob", "USD/2", 100)}},
+			{"postings": []map[string]any{posting("alice", "carol", "USD/2", 900)}},
+		},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	e := decode[Error](t, rec)
+	if e.Code != INSUFFICIENTFUNDS {
+		t.Errorf("code = %s", e.Code)
+	}
+	if !strings.Contains(e.Message, "transactions[1]") {
+		t.Errorf("message does not name the failing item: %s", e.Message)
+	}
+
+	// the first item must not have survived
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/alice/balances", nil))
+	if balances["USD/2"].Cmp(big.NewInt(500)) != 0 {
+		t.Errorf("alice = %s, want 500", balances["USD/2"])
+	}
+}
+
+func TestBulkIdempotencyAndDryRun(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "alice", 10000)
+
+	body := map[string]any{"transactions": []map[string]any{
+		{"postings": []map[string]any{posting("alice", "bob", "USD/2", 100)}},
+		{"postings": []map[string]any{posting("alice", "carol", "USD/2", 200)}},
+	}}
+
+	dry := do(t, s, http.MethodPost, base+"/transactions/bulk?dryRun=true", body)
+	if dry.Code != http.StatusOK {
+		t.Fatalf("dry run = %d, want 200: %s", dry.Code, dry.Body.String())
+	}
+	if b := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/alice/balances", nil)); b["USD/2"].Cmp(big.NewInt(10000)) != 0 {
+		t.Errorf("a dry run moved money: alice = %s", b["USD/2"])
+	}
+
+	first := decode[BatchResponse](t, do(t, s, http.MethodPost, base+"/transactions/bulk", body, "Idempotency-Key", "batch-1"))
+	second := decode[BatchResponse](t, do(t, s, http.MethodPost, base+"/transactions/bulk", body, "Idempotency-Key", "batch-1"))
+
+	if len(second.Transactions) != len(first.Transactions) {
+		t.Fatalf("replay returned %d, want %d", len(second.Transactions), len(first.Transactions))
+	}
+	for i := range first.Transactions {
+		if first.Transactions[i].Id != second.Transactions[i].Id {
+			t.Errorf("item %d: replay gave a different id", i)
+		}
+	}
+	if b := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/alice/balances", nil)); b["USD/2"].Cmp(big.NewInt(9700)) != 0 {
+		t.Errorf("alice = %s, want 9700: the batch must apply once", b["USD/2"])
+	}
+}
+
+func TestBulkSizeCapOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	items := make([]map[string]any, 101)
+	for i := range items {
+		items[i] = map[string]any{"postings": []map[string]any{posting("world", "a", "USD/2", 1)}}
+	}
+	rec := do(t, s, http.MethodPost, base+"/transactions/bulk", map[string]any{"transactions": items})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if code := decode[Error](t, rec).Code; code != VALIDATION {
+		t.Errorf("code = %s", code)
+	}
+}
+
+// bulk sits at /transactions/bulk and reads must not mistake it for an id.
+func TestBulkPathDoesNotShadowTransactionReads(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "alice", 100)
+
+	if rec := do(t, s, http.MethodGet, base+"/transactions/1", nil); rec.Code != http.StatusOK {
+		t.Errorf("reading transaction 1 = %d, want 200", rec.Code)
+	}
+	if rec := do(t, s, http.MethodGet, base+"/transactions/bulk", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("GET on the bulk path = %d, want 400 for a non numeric id", rec.Code)
+	}
+}

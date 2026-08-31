@@ -468,3 +468,53 @@ func optionalDate(w http.ResponseWriter, params url.Values, name string) (*time.
 	}
 	return &at, true
 }
+
+func (s *Server) commitBatch(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	dryRun, ok := boolParam(w, params, "dryRun")
+	if !ok {
+		return
+	}
+
+	var body BatchRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	items := make([]storage.BatchItem, len(body.Transactions))
+	for i, t := range body.Transactions {
+		items[i] = storage.BatchItem{Postings: fromAPIPostings(t.Postings)}
+		if t.Timestamp != nil {
+			items[i].Timestamp = *t.Timestamp
+		}
+		if t.Reference != nil {
+			items[i].Reference = *t.Reference
+		}
+		if t.Metadata != nil {
+			items[i].Metadata = map[string]string(*t.Metadata)
+		}
+	}
+
+	out, err := s.store(r.PathValue("ledger")).CommitBatch(r.Context(), items, storage.CommitOptions{
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		DryRun:         dryRun,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	resp := BatchResponse{Transactions: make([]Transaction, 0, len(out))}
+	for _, tx := range out {
+		resp.Transactions = append(resp.Transactions, toAPITransaction(tx))
+	}
+
+	status := http.StatusCreated
+	if dryRun {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, resp)
+}

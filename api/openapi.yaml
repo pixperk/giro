@@ -163,6 +163,62 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         default: { $ref: "#/components/responses/Error" }
 
+  /v1/ledgers/{ledger}/transactions/bulk:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    post:
+      tags: [transactions]
+      summary: Commit several transactions as one event
+      description: |
+        Applies every transaction or none of them.
+
+        This is atomic, and only atomic. A best effort batch is several requests
+        with fewer round trips, which a caller can do in a loop; all or nothing
+        is the thing that cannot be built out of single commits.
+
+        Items are applied in order and see each other's effects, so an item may
+        spend what an earlier item in the same batch provided. If any item is
+        rejected the whole batch is, and the error names the index that failed.
+
+        At most 100 items. An unbounded batch holds locks on an unbounded number
+        of rows, on tables other requests are queueing for.
+      operationId: commitBatch
+      parameters:
+        - name: dryRun
+          in: query
+          description: Run the whole batch and roll back, returning what would have happened.
+          schema: { type: boolean, default: false }
+        - name: Idempotency-Key
+          in: header
+          description: |
+            Covers the whole batch. Replaying it returns the transactions the
+            first attempt created rather than committing them again.
+          schema: { type: string, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+      responses:
+        "200":
+          description: What a dry run would have done. Nothing was committed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchResponse" }
+        "201":
+          description: Committed, or replayed from an earlier identical request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: An item is valid but cannot be applied. Nothing was committed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        default: { $ref: "#/components/responses/Error" }
+
   /v1/ledgers/{ledger}/transactions/{id}:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"
@@ -619,6 +675,24 @@ components:
           type: string
           description: The caller's own identifier, unique per ledger.
         metadata: { $ref: "#/components/schemas/Metadata" }
+
+    BatchRequest:
+      type: object
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/CreateTransactionRequest" }
+
+    BatchResponse:
+      type: object
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          items: { $ref: "#/components/schemas/Transaction" }
 
     Transaction:
       type: object
