@@ -252,7 +252,7 @@ func (s *Store) upsertAccounts(ctx context.Context, tx pgx.Tx, updates []ledger.
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
+	defer func() { _ = results.Close() }()
 	for range addresses {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("upsert accounts: %w", err)
@@ -305,7 +305,7 @@ func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transactio
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
+	defer func() { _ = results.Close() }()
 	for range len(t.Postings) * 2 {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("insert moves: %w", err)

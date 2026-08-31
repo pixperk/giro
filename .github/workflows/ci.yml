@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# a new push to the same branch cancels the run in flight
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt clean:"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+  test:
+    runs-on: ubuntu-latest
+
+    # a service container rather than starting postgres from inside the tests.
+    # the suite only needs a connection string, and it makes its own schema per
+    # test, so there is nothing for a container library to manage.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: giro
+          POSTGRES_PASSWORD: giro
+          POSTGRES_DB: giro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://giro:giro@localhost:5432/giro_test
+      GIRO_TEST_DATABASE_URL: postgres://giro:giro@localhost:5432/giro_test
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # shuffle because the storage suite shares one database and derives
+      # schema names from a counter, which is exactly the setup that drifts
+      # into accidental order dependence.
+      - name: test
+        run: go test -race -shuffle=on -coverprofile=coverage.out ./...
+
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+  migrations:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: giro
+          POSTGRES_PASSWORD: giro
+          POSTGRES_DB: giro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://giro:giro@localhost:5432/giro
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # migrations are forward only, so the thing worth proving is that they
+      # still apply to an empty database. a migration that only works against
+      # a developer's existing schema passes every other check.
+      - name: apply to an empty database
+        run: go run ./cmd/giro migrate up
+
+      - name: nothing left pending
+        run: |
+          go run ./cmd/giro migrate status
+          if go run ./cmd/giro migrate status | grep -q pending; then
+            echo "migrations remain pending after a successful up"
+            exit 1
+          fi
+
+      - name: applying twice is a no-op
+        run: |
+          out=$(go run ./cmd/giro migrate up)
+          echo "$out"
+          echo "$out" | grep -q "nothing to do" || {
+            echo "a second up should have been a no-op"
+            exit 1
+          }
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

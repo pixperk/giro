@@ -26,7 +26,7 @@ func withConn(ctx context.Context, fn func(context.Context, *pgx.Conn, fs.FS) er
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer conn.Close(context.WithoutCancel(ctx))
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
 	sub, err := fs.Sub(giro.MigrationsFS, giro.MigrationsDir)
 	if err != nil {

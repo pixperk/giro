@@ -137,7 +137,7 @@ func (s *Store) applyVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vo
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
+	defer func() { _ = results.Close() }()
 
 	for i := range updates {
 		tag, err := results.Exec()

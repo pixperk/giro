@@ -47,14 +47,22 @@ cover-html:
     @go test -coverprofile=coverage.out ./... > /dev/null
     @go tool cover -html=coverage.out
 
-# format, vet, then test. run before committing
-check: fmt vet test
+# everything ci runs, in the same order. run before committing
+check: fmt vet lint test
 
 fmt:
     gofmt -l -w .
 
 vet:
     go vet ./...
+
+# needs golangci-lint, brew install golangci-lint
+lint:
+    golangci-lint run ./...
+
+# known cves in anything reachable from our code, including transitively
+vuln:
+    go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # build the binary into ./bin
 build:

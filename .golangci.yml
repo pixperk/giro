@@ -1,0 +1,31 @@
+version: "2"
+
+linters:
+  enable:
+    # correctness
+    - errorlint      # %w wrapping and errors.Is/As misuse
+    - nilerr         # returning nil when err is non-nil
+    - bodyclose
+    - rowserrcheck   # a pgx/sql rows loop that never checks rows.Err()
+    - sqlclosecheck  # rows and statements that are never closed
+    # clarity
+    - misspell
+    - unconvert
+    - wastedassign
+
+  settings:
+    errcheck:
+      # deferred Close on a read only handle has nothing useful to report
+      exclude-functions:
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+
+  exclusions:
+    rules:
+      # tests may ignore errors when the assertion is the point
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
