@@ -178,6 +178,37 @@ type LogPage struct {
 // Example: {"orderId":"ord_8812","provider":"stripe"}
 type Metadata map[string]string
 
+// Move One half of a posting, from this account's point of view.
+type Move struct {
+	// Amount Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
+	//
+	// Example: 10000
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	EffectiveDate time.Time `json:"effectiveDate"`
+
+	// EffectiveVolumes The same in effective date order, which is the running balance a
+	// statement should show. Rewritten when a transaction lands behind it.
+	EffectiveVolumes *Volumes `json:"effectiveVolumes,omitempty"`
+
+	// Incoming True when value arrived at this account, false when it left.
+	Incoming      bool      `json:"incoming"`
+	InsertionDate time.Time `json:"insertionDate"`
+
+	// Seq Global insertion order. Opaque; use it only for ordering.
+	Seq           int64 `json:"seq"`
+	TransactionId int64 `json:"transactionId"`
+
+	// Volumes The account's volumes after this move, in insertion order. Frozen.
+	Volumes Volumes `json:"volumes"`
+}
+
+// MovePage defines model for MovePage.
+type MovePage struct {
+	Items []Move  `json:"items"`
+	Next  *string `json:"next,omitempty"`
+}
+
 // Posting defines model for Posting.
 type Posting struct {
 	// Amount Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
@@ -330,6 +361,23 @@ type GetBalancesParams struct {
 	//
 	// Defaults to now.
 	At *At `form:"at,omitempty" json:"at,omitempty"`
+}
+
+// ListMovesParams defines parameters for ListMoves.
+type ListMovesParams struct {
+	Asset *string `form:"asset,omitempty" json:"asset,omitempty"`
+
+	// From Inclusive lower bound on the effective date.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Inclusive upper bound on the effective date.
+	To    *time.Time `form:"to,omitempty" json:"to,omitempty"`
+	Limit *Limit     `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque position from a previous response. When present every other
+	// query parameter is ignored, because the cursor carries the filter it
+	// was created with.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
 // AggregateBalancesParams defines parameters for AggregateBalances.

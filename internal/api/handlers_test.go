@@ -842,3 +842,103 @@ func TestDryRunParameterIsValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestStatementEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	at := func(from, to string, amount int64, day int) {
+		t.Helper()
+		rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+			"postings":  []map[string]any{posting(from, to, "USD/2", amount)},
+			"timestamp": fmt.Sprintf("2026-03-%02dT12:00:00Z", day),
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatal(rec.Body.String())
+		}
+	}
+	at("world", "alice", 100, 1)
+	at("alice", "bob", 30, 5)
+	at("world", "alice", 50, 3) // arrives last, happened third
+
+	page := decode[MovePage](t, do(t, s, http.MethodGet, base+"/accounts/alice/moves", nil))
+	if len(page.Items) != 3 {
+		t.Fatalf("%d rows, want 3", len(page.Items))
+	}
+
+	// effective order, not the order they arrived
+	for i, day := range []int{1, 3, 5} {
+		if got := page.Items[i].EffectiveDate.Day(); got != day {
+			t.Errorf("row %d is day %d, want %d", i, got, day)
+		}
+	}
+	// and the running balance follows it
+	for i, want := range []int64{100, 150, 120} {
+		v := page.Items[i].EffectiveVolumes
+		if v == nil {
+			t.Fatalf("row %d has no effective volumes", i)
+		}
+		got := new(big.Int).Sub(v.Input, v.Output)
+		if got.Cmp(big.NewInt(want)) != 0 {
+			t.Errorf("row %d running balance = %s, want %d", i, got, want)
+		}
+	}
+	if !page.Items[0].Incoming || page.Items[2].Incoming {
+		t.Error("directions are wrong")
+	}
+}
+
+func TestStatementFiltersAndPagination(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	for range 7 {
+		fund(t, s, base, "alice", 10)
+	}
+
+	var seen []int64
+	path := base + "/accounts/alice/moves?limit=2"
+	for {
+		page := decode[MovePage](t, do(t, s, http.MethodGet, path, nil))
+		for _, m := range page.Items {
+			seen = append(seen, m.Seq)
+		}
+		if page.Next == nil {
+			break
+		}
+		// neither the address nor the filter is repeated
+		path = base + "/accounts/alice/moves?cursor=" + *page.Next
+	}
+	if len(seen) != 7 {
+		t.Fatalf("walked %d rows, want 7", len(seen))
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i] <= seen[i-1] {
+			t.Fatalf("row %d out of order", i)
+		}
+	}
+
+	// a window
+	page := decode[MovePage](t, do(t, s, http.MethodGet,
+		base+"/accounts/alice/moves?from=2030-01-01T00:00:00Z", nil))
+	if len(page.Items) != 0 {
+		t.Errorf("%d rows in a future window, want 0", len(page.Items))
+	}
+
+	bad := do(t, s, http.MethodGet, base+"/accounts/alice/moves?from=nonsense", nil)
+	if bad.Code != http.StatusBadRequest {
+		t.Errorf("bad date = %d, want 400", bad.Code)
+	}
+}
+
+func TestStatementOfAnUnusedAccountIsEmpty(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	rec := do(t, s, http.MethodGet, base+"/accounts/nobody/moves", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if page := decode[MovePage](t, rec); len(page.Items) != 0 {
+		t.Errorf("%d rows", len(page.Items))
+	}
+}

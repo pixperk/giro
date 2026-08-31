@@ -43,6 +43,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/accounts/{address}/metadata", s.setAccountMetadata)
 	s.mux.HandleFunc("DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}", s.deleteAccountMetadata)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/accounts/{address}/balances", s.getBalances)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/accounts/{address}/moves", s.listMoves)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/balances", s.aggregateBalances)
 
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/logs", s.listLogs)

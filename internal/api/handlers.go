@@ -409,3 +409,62 @@ func (s *Server) revertTransaction(w http.ResponseWriter, r *http.Request) {
 		Reversal: toAPITransaction(result.Reversal),
 	})
 }
+
+func (s *Server) listMoves(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := intParam(w, params, "limit")
+	if !ok {
+		return
+	}
+	from, ok := optionalDate(w, params, "from")
+	if !ok {
+		return
+	}
+	to, ok := optionalDate(w, params, "to")
+	if !ok {
+		return
+	}
+
+	page, err := s.store(r.PathValue("ledger")).ListMoves(r.Context(), storage.ListMovesQuery{
+		Limit:  limit,
+		Cursor: params.Get("cursor"),
+		Filter: storage.MoveFilter{
+			Address: r.PathValue("address"),
+			Asset:   params.Get("asset"),
+			From:    from,
+			To:      to,
+		},
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	out := MovePage{Items: make([]Move, 0, len(page.Items))}
+	for _, m := range page.Items {
+		out.Items = append(out.Items, toAPIMove(m))
+	}
+	if page.Next != "" {
+		out.Next = &page.Next
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func optionalDate(w http.ResponseWriter, params url.Values, name string) (*time.Time, bool) {
+	raw := params.Get(name)
+	if raw == "" {
+		return nil, true
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{
+			Code:    VALIDATION,
+			Message: name + " must be an RFC 3339 timestamp",
+		})
+		return nil, false
+	}
+	return &at, true
+}

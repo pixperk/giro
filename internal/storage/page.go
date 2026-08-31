@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // the largest page a caller can ask for. an unbounded limit is a denial of
@@ -31,6 +32,10 @@ type cursor[F any] struct {
 	Filter F     `json:"f"`
 	After  int64 `json:"a"`
 	Limit  int   `json:"l"`
+
+	// moves are ordered by (effective_date, seq), so their position needs both.
+	// nil for everything ordered by a single id.
+	AfterDate *time.Time `json:"d,omitempty"`
 }
 
 func encodeCursor[F any](c cursor[F]) (string, error) {

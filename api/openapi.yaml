@@ -275,6 +275,48 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/Error" }
 
+  /v1/ledgers/{ledger}/accounts/{address}/moves:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/Address"
+    get:
+      tags: [accounts]
+      summary: An account's statement
+      description: |
+        Every movement this account was part of, oldest first, in **effective
+        date** order.
+
+        That is what a statement means: the sequence in which things happened,
+        not the sequence in which this database heard about them. The two differ
+        whenever a transaction has been backdated.
+
+        Each row carries the account's balance immediately after that movement,
+        in both orderings. `volumes` is frozen at commit; `effectiveVolumes` is
+        what the running balance actually was on that date.
+      operationId: listMoves
+      parameters:
+        - name: asset
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          description: Inclusive lower bound on the effective date.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: Inclusive upper bound on the effective date.
+          schema: { type: string, format: date-time }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MovePage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        default: { $ref: "#/components/responses/Error" }
+
   /v1/ledgers/{ledger}/accounts/{address}/metadata:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"
@@ -698,6 +740,43 @@ components:
           format: byte
           description: SHA-256 over the previous entry's hash and this entry's bytes.
         idempotencyKey: { type: string }
+
+    Move:
+      type: object
+      required: [seq, transactionId, asset, amount, incoming, effectiveDate, insertionDate, volumes]
+      description: One half of a posting, from this account's point of view.
+      properties:
+        seq:
+          type: integer
+          format: int64
+          description: Global insertion order. Opaque; use it only for ordering.
+        transactionId: { type: integer, format: int64 }
+        asset: { type: string }
+        amount: { $ref: "#/components/schemas/Amount" }
+        incoming:
+          type: boolean
+          description: True when value arrived at this account, false when it left.
+        effectiveDate: { type: string, format: date-time }
+        insertionDate: { type: string, format: date-time }
+        volumes:
+          allOf:
+            - $ref: "#/components/schemas/Volumes"
+          description: The account's volumes after this move, in insertion order. Frozen.
+        effectiveVolumes:
+          allOf:
+            - $ref: "#/components/schemas/Volumes"
+          description: |
+            The same in effective date order, which is the running balance a
+            statement should show. Rewritten when a transaction lands behind it.
+
+    MovePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Move" }
+        next: { type: string }
 
     TransactionPage:
       type: object

@@ -126,6 +126,24 @@ func toAPILog(l ledger.Log) Log {
 	return out
 }
 
+func toAPIMove(m storage.Move) Move {
+	out := Move{
+		Seq:           m.Seq,
+		TransactionId: m.TransactionID,
+		Asset:         m.Asset,
+		Amount:        m.Amount,
+		Incoming:      m.Incoming,
+		EffectiveDate: m.EffectiveDate,
+		InsertionDate: m.InsertionDate,
+		Volumes:       toAPIVolumes(m.Volumes),
+	}
+	if m.EffectiveVolumes != nil {
+		v := toAPIVolumes(*m.EffectiveVolumes)
+		out.EffectiveVolumes = &v
+	}
+	return out
+}
+
 func toAPILedger(l *storage.LedgerInfo) Ledger {
 	return Ledger{Name: l.Name, AddedAt: l.AddedAt}
 }
