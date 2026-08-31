@@ -102,6 +102,9 @@ func (s *Store) commitBatchOnce(ctx context.Context, items []BatchItem, opts Com
 	// batches holding overlapping accounts in different item orders would
 	// deadlock. sorting within an item is not enough: the ordering has to hold
 	// across the whole transaction.
+	if err := s.lockBatch(ctx, tx, items); err != nil {
+		return nil, err
+	}
 
 	out := make([]*ledger.Transaction, 0, len(items))
 	for i, item := range items {

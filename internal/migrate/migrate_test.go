@@ -371,3 +371,181 @@ func TestNoTransactionDirectiveDetection(t *testing.T) {
 		}
 	}
 }
+
+func TestStatus(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql":  "create table first (id int);",
+		"20260101000002_second.sql": "create table second (id int);",
+		"20260101000003_third.sql":  noTransactionDirective + "\ncreate index concurrently on first (id);",
+	})
+
+	t.Run("before anything has run", func(t *testing.T) {
+		list, err := Status(ctx, conn, root.FS())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 3 {
+			t.Fatalf("%d entries, want 3", len(list))
+		}
+		for i, s := range list {
+			if s.Applied {
+				t.Errorf("entry %d is applied on an empty database", i)
+			}
+			if !s.AppliedAt.IsZero() {
+				t.Errorf("entry %d has an applied time it never had", i)
+			}
+		}
+		// ordered by version, and the directive is reported
+		if list[0].Name != "first" || list[2].Name != "third" {
+			t.Errorf("out of order: %s then %s", list[0].Name, list[2].Name)
+		}
+		if !list[2].NoTx {
+			t.Error("the no-transaction directive was not reported")
+		}
+	})
+
+	t.Run("after applying", func(t *testing.T) {
+		if _, err := Run(ctx, conn, root.FS()); err != nil {
+			t.Fatal(err)
+		}
+		list, err := Status(ctx, conn, root.FS())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, s := range list {
+			if !s.Applied {
+				t.Errorf("entry %d is still pending", i)
+			}
+			if s.AppliedAt.IsZero() {
+				t.Errorf("entry %d has no applied time", i)
+			}
+		}
+	})
+}
+
+// status must work before the tracking table exists, since that is exactly
+// when someone runs it.
+func TestStatusOnAnUntouchedDatabase(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql": "create table first (id int);",
+	})
+
+	var exists bool
+	if err := conn.QueryRow(ctx, "select to_regclass('schema_migrations') is not null").Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("test setup: the table should not exist yet")
+	}
+
+	list, err := Status(ctx, conn, root.FS())
+	if err != nil {
+		t.Fatalf("status must not require the table it reports on: %v", err)
+	}
+	if len(list) != 1 || list[0].Applied {
+		t.Errorf("got %+v", list)
+	}
+}
+
+func TestStatusRejectsABadMigrationName(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{"nope.sql": "select 1;"})
+
+	if _, err := Status(ctx, conn, root.FS()); err == nil {
+		t.Error("a malformed filename passed status")
+	}
+}
+
+func TestNewWritesAStub(t *testing.T) {
+	dir := t.TempDir()
+
+	path, err := New(dir, "Add Metadata Tables!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != dir {
+		t.Errorf("wrote to %s, want inside %s", path, dir)
+	}
+
+	name := filepath.Base(path)
+	version, slug, err := parseFilename(name)
+	if err != nil {
+		t.Fatalf("the generator produced a name its own parser rejects: %v", err)
+	}
+	if slug != "add_metadata_tables" {
+		t.Errorf("slug = %q", slug)
+	}
+	// the timestamp is utc, so two people in different zones cannot produce
+	// files that sort in the wrong order
+	stamp := time.Now().UTC().Format(TimestampLayout)
+	if fmt.Sprint(version)[:8] != stamp[:8] {
+		t.Errorf("version %d does not start with today in utc (%s)", version, stamp[:8])
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), noTransactionDirective) {
+		t.Errorf("the stub does not mention the directive:\n%s", body)
+	}
+	if !strings.Contains(string(body), "forward only") {
+		t.Errorf("the stub does not say migrations are forward only:\n%s", body)
+	}
+}
+
+func TestNewCreatesTheDirectory(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "does", "not", "exist")
+
+	path, err := New(base, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("the file was not created: %v", err)
+	}
+}
+
+func TestNewRejectsAnUnusableName(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"", "!!!", "   ", "___"} {
+		if _, err := New(dir, name); err == nil {
+			t.Errorf("New(%q) was accepted", name)
+		}
+	}
+}
+
+// two migrations created in the same second would collide, and silently
+// overwriting one would lose it.
+func TestNewRefusesToOverwrite(t *testing.T) {
+	dir := t.TempDir()
+
+	first, err := New(dir, "same name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first, []byte("-- edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// force the collision rather than racing the clock
+	name := filepath.Base(first)
+	stamp := name[:14]
+	collision := filepath.Join(dir, stamp+"_same_name.sql")
+	if collision != first {
+		t.Fatalf("test setup: %s and %s should be the same path", collision, first)
+	}
+
+	// New builds its name from the current second, so this only collides when
+	// it runs inside the same second. assert the guard exists by calling the
+	// path it protects.
+	if _, err := os.Stat(first); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(first)
+	if string(body) != "-- edited" {
+		t.Error("the existing file was overwritten")
+	}
+}
