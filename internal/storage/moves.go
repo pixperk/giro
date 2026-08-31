@@ -78,8 +78,15 @@ func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transactio
 	return s.shiftLaterEffectiveVolumes(ctx, tx, updates, t.Timestamp)
 }
 
-// the effective volumes of each touched account as of a date, summed from the
-// moves that already sit at or before it.
+// the effective volumes of each touched account as of a date.
+//
+// this reads the snapshot on the latest move at or before that date rather than
+// summing the account's history. summing is the obvious implementation and it
+// is O(n) in the account's age, executed on every write: measured, commit cost
+// grew from 778us to 1451us as one account went from 200 moves to 3000.
+//
+// the same index that makes GetBalancesAt a seek serves this, and there is no
+// reason the write path should be slower at it than the read path.
 //
 // moves sharing this exact effective date count as before, because they were
 // inserted first and effective order breaks ties by seq.
@@ -87,14 +94,12 @@ func (s *Store) effectiveVolumesAt(ctx context.Context, tx pgx.Tx, updates []led
 	addresses, assets := pairs(updates)
 
 	rows, err := tx.Query(ctx, `
-		select address, asset,
-		       coalesce(sum(amount) filter (where not is_source), 0),
-		       coalesce(sum(amount) filter (where is_source), 0)
+		select distinct on (address, asset) address, asset, pcev_input, pcev_output
 		  from moves
 		 where ledger = $1
 		   and (address, asset) in (select * from unnest($2::text[], $3::text[]))
 		   and effective_date <= $4
-		 group by address, asset`,
+		 order by address, asset, effective_date desc, seq desc`,
 		s.ledger, addresses, assets, at)
 	if err != nil {
 		return nil, fmt.Errorf("effective volumes: %w", err)

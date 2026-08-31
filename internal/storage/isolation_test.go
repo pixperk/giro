@@ -41,7 +41,7 @@ func twoLedgers(t *testing.T) (context.Context, *Store, *Store, *pgxpool.Pool) {
 	return ctx, mine, theirs, pool
 }
 
-func mustCommit(t *testing.T, ctx context.Context, s *Store, from, to string, amount int64) *ledger.Transaction {
+func mustCommit(t testing.TB, ctx context.Context, s *Store, from, to string, amount int64) *ledger.Transaction {
 	t.Helper()
 	tx, err := s.CommitTransaction(ctx, ledger.Postings{
 		{Source: from, Destination: to, Asset: "USD/2", Amount: n(amount)},

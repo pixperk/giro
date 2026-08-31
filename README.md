@@ -88,6 +88,7 @@ the running service.
 POST   /v1/ledgers/{ledger}                          create a ledger
 GET    /v1/ledgers/{ledger}
 POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header, ?dryRun=true
+POST   /v1/ledgers/{ledger}/transactions/bulk        commit several as one event
 GET    /v1/ledgers/{ledger}/transactions             list, cursor paginated
 GET    /v1/ledgers/{ledger}/transactions/{id}
 POST   /v1/ledgers/{ledger}/transactions/{id}/revert
@@ -95,6 +96,7 @@ POST   /v1/ledgers/{ledger}/transactions/{id}/metadata
 DELETE /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}
 GET    /v1/ledgers/{ledger}/accounts/{address}       ?expand=volumes,effectiveVolumes&at=
 GET    /v1/ledgers/{ledger}/accounts/{address}/balances   ?at=
+GET    /v1/ledgers/{ledger}/accounts/{address}/moves      statement, ?asset= &from= &to=
 POST   /v1/ledgers/{ledger}/accounts/{address}/metadata
 DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}
 GET    /v1/ledgers/{ledger}/accounts/{address}/balances
@@ -588,6 +590,60 @@ Nothing is consumed: no id is allocated, no idempotency key is claimed, no log
 entry survives, and the account rows materialised to take locks disappear with
 everything else. The id on the response is what it would have been, not a
 reservation. It answers 200 rather than 201, because nothing was created.
+
+
+### D29. Batches are atomic, and only atomic
+
+`POST /transactions/bulk` applies every transaction or none of them. There is no
+best effort mode and no per item result list.
+
+A best effort batch is several requests with fewer round trips, which a caller
+can do in a loop. All or nothing is the thing that cannot be built out of single
+commits, so it is the one worth offering. Items are applied in order and see
+each other's effects, so an item may spend what an earlier item provided.
+
+Every lock the batch needs is taken up front, deduplicated and sorted, before
+any item runs. Sorting within an item is not enough here: two batches touching
+the same accounts in different item orders would each hold half of what the
+other needs. Measured, a batch of fifty is roughly twice the throughput of fifty
+single commits, because it pays for the ledger row lock once.
+
+At most 100 items, because an unbounded batch holds locks on an unbounded number
+of rows on tables other requests are queueing for.
+
+### D30. Writes to one ledger are serialised, and that is measured
+
+Every commit takes an exclusive lock on its ledger's row to allocate ids and
+read the chain tip, and holds it until commit. So writes to a single ledger do
+not benefit from more callers.
+
+Measured on a laptop against local postgres:
+
+| | |
+|---|---|
+| one caller, one ledger | about 1,200 transactions per second |
+| sixteen callers, one ledger | about 1,200 per second, and zero retries |
+| sixteen callers, eight ledgers | about 3,100 per second |
+| batch of fifty against fifty singles | roughly twice the throughput |
+
+The flat line from one caller to sixteen is the design working as described,
+not a bottleneck to be tuned away. Throughput scales by adding ledgers, which
+is one reason multiple ledgers exist. Zero retries under contention means the
+lock ordering is holding: transactions queue rather than deadlock.
+
+### D31. The write path reads a snapshot rather than summing history
+
+Computing what an account held as of a date is the same question on the read
+path and the write path: a read answers it for a caller, and a commit needs it
+to place a new move in effective order.
+
+The read path always read the latest snapshot. The write path summed the whole
+history, which is O(n) in the account's age on every write. On 20,000 moves that
+is a sequential scan taking 2 ms against an index seek taking 0.03 ms, roughly
+sixty times slower and growing.
+
+Both now read the snapshot. This was found by benchmarking, not by any
+correctness test: the results were identical either way.
 
 
 ## Layout

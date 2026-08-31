@@ -32,7 +32,7 @@ func testURL() string {
 
 // every test gets its own schema, migrated from scratch, so they cannot see
 // each other's rows.
-func testStore(t *testing.T) (context.Context, *Store, *pgxpool.Pool) {
+func testStore(t testing.TB) (context.Context, *Store, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -96,7 +96,7 @@ func testCounter() int {
 	return counter
 }
 
-func balance(t *testing.T, ctx context.Context, pool *pgxpool.Pool, address, asset string) *big.Int {
+func balance(t testing.TB, ctx context.Context, pool *pgxpool.Pool, address, asset string) *big.Int {
 	t.Helper()
 	var s string
 	err := pool.QueryRow(ctx,
@@ -110,7 +110,7 @@ func balance(t *testing.T, ctx context.Context, pool *pgxpool.Pool, address, ass
 }
 
 // no asset may create or destroy value, ever.
-func assertConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func assertConserved(t testing.TB, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	rows, err := pool.Query(ctx,
 		"select asset, (sum(input) - sum(output))::text from accounts_volumes where ledger='main' group by asset")
@@ -129,7 +129,7 @@ func assertConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
-func fund(t *testing.T, ctx context.Context, s *Store, account string, amount int64) {
+func fund(t testing.TB, ctx context.Context, s *Store, account string, amount int64) {
 	t.Helper()
 	_, err := s.CommitTransaction(ctx, ledger.Postings{
 		{Source: "world", Destination: account, Asset: "USD/2", Amount: n(amount)},
