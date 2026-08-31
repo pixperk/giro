@@ -1,0 +1,18 @@
+package: api
+output: internal/api/gen.go
+
+# models and the embedded spec only.
+#
+# the strict server generator also emits routing and query parameter binding,
+# which drags in github.com/oapi-codegen/runtime, go-jsonmerge and google/uuid
+# as runtime dependencies. that is three modules to bind query strings, for a
+# service whose whole routing surface is seven endpoints on stdlib ServeMux.
+#
+# so the types come from the contract, and the routing is hand written. what
+# the compiler no longer enforces, a test does: every path in the embedded spec
+# must have a registered route.
+# embedded-spec is off too: its GetSwagger() parses the document at runtime via
+# kin-openapi, and all we want is to serve the bytes. we embed the yaml
+# ourselves with //go:embed, which needs nothing.
+generate:
+  models: true

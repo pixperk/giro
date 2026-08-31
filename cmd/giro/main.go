@@ -15,6 +15,7 @@ usage:
   giro <command> [args]
 
 commands:
+  serve      run the http api
   migrate    apply and inspect database migrations
 
 run a command with no arguments to see its own usage.
@@ -51,6 +52,8 @@ func dispatch(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "migrate":
 		return migrateCommand(ctx, args[1:])
+	case "serve":
+		return serveCommand(ctx, args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil

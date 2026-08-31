@@ -1,0 +1,468 @@
+openapi: 3.0.3
+
+info:
+  title: giro
+  version: "1.0.0"
+  description: |
+    A double entry ledger.
+
+    Value moves between accounts as **postings**. A posting names both sides and
+    carries a positive amount, so an unbalanced entry cannot be expressed. A
+    **transaction** is an ordered list of postings applied atomically.
+
+    Money enters the ledger from the reserved `world` account and leaves to it.
+    `world` is the only account permitted a negative balance, so for any asset
+    every balance summed together is always exactly zero.
+
+    ### Amounts
+
+    Amounts are arbitrary precision integers in the asset's smallest unit, sent
+    as JSON numbers. `USD/2` means two decimal places, so `10000` is $100.00.
+
+    They can exceed 2^53. JavaScript's `JSON.parse` silently loses precision
+    above that, so a browser client must use a big number aware parser rather
+    than the built in one.
+
+servers:
+  - url: /
+
+tags:
+  - name: ledgers
+  - name: transactions
+  - name: accounts
+  - name: logs
+
+paths:
+  /v1/ledgers/{ledger}:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    post:
+      tags: [ledgers]
+      summary: Create a ledger
+      operationId: createLedger
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/transactions:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    get:
+      tags: [transactions]
+      summary: List transactions
+      operationId: listTransactions
+      parameters:
+        - name: account
+          in: query
+          description: Only transactions where this address is a source or a destination.
+          schema: { type: string }
+        - name: accountPrefix
+          in: query
+          description: Only transactions touching an account under this prefix, for example `users:`.
+          schema: { type: string }
+        - name: reference
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransactionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      tags: [transactions]
+      summary: Commit a transaction
+      description: |
+        Applies every posting atomically, or none of them.
+
+        Rejected if any account other than `world` would end below zero. The
+        check is on the final state, so an account may pass through zero within
+        a transaction.
+      operationId: createTransaction
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: |
+            Replaying this key returns the original transaction rather than
+            creating a second one.
+
+            The key is stored with a hash of the request body. Reusing a key
+            with different inputs is an error rather than a silent success for
+            a payment that never happened.
+          schema: { type: string, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTransactionRequest" }
+      responses:
+        "201":
+          description: Committed, or replayed from an earlier identical request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: The postings are valid but cannot be applied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/transactions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [transactions]
+      summary: Read a transaction
+      operationId: getTransaction
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/accounts/{address}:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/Address"
+    get:
+      tags: [accounts]
+      summary: Read an account
+      description: |
+        Accounts are never registered. One exists because a posting named it,
+        so this returns 404 only for an address that has never been used.
+      operationId: getAccount
+      parameters:
+        - name: expand
+          in: query
+          description: |
+            Comma separated extras to include. Only `volumes` is supported.
+            Omitted by default because it costs a second query.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/accounts/{address}/balances:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/Address"
+    get:
+      tags: [accounts]
+      summary: Read one account's balances
+      description: |
+        An address that has never been touched returns an empty object rather
+        than a 404: its balance is zero either way.
+      operationId: getBalances
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Balances" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/balances:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    get:
+      tags: [accounts]
+      summary: Aggregate balances across a subtree
+      description: |
+        Sums every account under a prefix. With no prefix this covers the whole
+        ledger, including `world`, and must therefore be exactly zero for every
+        asset. That is the conservation invariant, readable over HTTP.
+      operationId: aggregateBalances
+      parameters:
+        - name: prefix
+          in: query
+          description: For example `users:`. Matches on segment boundaries, so `users:` never matches `fees:users:refunds`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Balances" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/logs:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    get:
+      tags: [logs]
+      summary: List log entries
+      description: |
+        The log is the source of truth. Every mutation appends an entry whose
+        hash covers the previous entry's hash, so editing history invalidates
+        every hash after the edit.
+
+        Ids are gapless, so a missing entry is detectable.
+      operationId: listLogs
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        default: { $ref: "#/components/responses/Error" }
+
+components:
+  parameters:
+    # named LedgerPath rather than Ledger so the generated parameter type does
+    # not collide with the Ledger schema. the wire name stays `ledger`.
+    LedgerPath:
+      name: ledger
+      in: path
+      required: true
+      description: Ledger name. Each ledger is a separate set of books with its own ids and its own log chain.
+      schema: { type: string }
+    Address:
+      name: address
+      in: path
+      required: true
+      description: Account address, colon separated segments, for example `users:alice:wallet`.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      description: |
+        Opaque position from a previous response. When present every other
+        query parameter is ignored, because the cursor carries the filter it
+        was created with.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Malformed request.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Conflicts with something that already exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Error:
+      description: Unexpected error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Amount:
+      type: integer
+      format: bigint
+      minimum: 0
+      description: Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
+      x-go-type: big.Int
+      x-go-type-import:
+        path: math/big
+      example: 10000
+
+    Posting:
+      type: object
+      required: [source, destination, asset, amount]
+      properties:
+        source:
+          type: string
+          description: Where the value leaves. `world` for money entering the ledger.
+          example: world
+        destination:
+          type: string
+          example: "users:alice"
+        asset:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*(/\d{1,6})?$'
+          description: Carries its own scale. `USD/2` means two decimal places.
+          example: "USD/2"
+        amount: { $ref: "#/components/schemas/Amount" }
+
+    Volumes:
+      type: object
+      required: [input, output]
+      description: |
+        Two counters that only ever increase. Balance is `input - output`.
+        Keeping gross flow distinguishes an account that has settled millions
+        and now holds nothing from one that was never used.
+      properties:
+        input: { $ref: "#/components/schemas/Amount" }
+        output: { $ref: "#/components/schemas/Amount" }
+
+    Balances:
+      type: object
+      description: Asset to balance. A balance may be negative only for `world`.
+      additionalProperties: { $ref: "#/components/schemas/Amount" }
+      example: { "USD/2": 7500 }
+
+    Metadata:
+      type: object
+      description: Opaque to the ledger. Never interpreted, only stored.
+      additionalProperties: { type: string }
+
+    CreateTransactionRequest:
+      type: object
+      required: [postings]
+      properties:
+        postings:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Posting" }
+        timestamp:
+          type: string
+          format: date-time
+          description: |
+            When the movement happened economically, which may be earlier than
+            now. Defaults to now. Stored at microsecond precision.
+        reference:
+          type: string
+          description: The caller's own identifier, unique per ledger.
+        metadata: { $ref: "#/components/schemas/Metadata" }
+
+    Transaction:
+      type: object
+      required: [id, postings, timestamp, insertedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        postings:
+          type: array
+          items: { $ref: "#/components/schemas/Posting" }
+        timestamp:
+          type: string
+          format: date-time
+          description: When it happened economically.
+        insertedAt:
+          type: string
+          format: date-time
+          description: When this database learned of it. May be later than `timestamp`.
+        revertedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when a reversal exists. The reversal is a separate transaction with its own id.
+        reference: { type: string }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+        postCommitVolumes:
+          type: object
+          description: Volumes of every touched account immediately after this transaction. Frozen at commit and never rewritten.
+          additionalProperties:
+            type: object
+            additionalProperties: { $ref: "#/components/schemas/Volumes" }
+
+    Account:
+      type: object
+      required: [address, firstUsage, insertionDate, updatedAt]
+      properties:
+        address: { type: string, example: "users:alice" }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+        firstUsage:
+          type: string
+          format: date-time
+          description: Earliest effective date this account has been involved in. A backdated transaction can move it earlier.
+        insertionDate: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        volumes:
+          type: object
+          description: Present only when requested with `expand=volumes`.
+          additionalProperties: { $ref: "#/components/schemas/Volumes" }
+
+    Ledger:
+      type: object
+      required: [name, addedAt]
+      properties:
+        name: { type: string }
+        addedAt: { type: string, format: date-time }
+
+    Log:
+      type: object
+      required: [id, type, date, data, hash]
+      properties:
+        id: { type: integer, format: int64 }
+        type:
+          type: string
+          enum: [NEW_TRANSACTION, REVERTED_TRANSACTION, SET_METADATA, DELETE_METADATA]
+        date: { type: string, format: date-time }
+        data:
+          description: The mutation, verbatim. These exact bytes are what the hash covers.
+        hash:
+          type: string
+          format: byte
+          description: SHA-256 over the previous entry's hash and this entry's bytes.
+        idempotencyKey: { type: string }
+
+    TransactionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Transaction" }
+        next:
+          type: string
+          description: Cursor for the following page. Absent when there is nothing after this one.
+
+    LogPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Log" }
+        next: { type: string }
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable identifier. Branch on this rather than on the message.
+          enum:
+            - VALIDATION
+            - NOT_FOUND
+            - CONFLICT
+            - INSUFFICIENT_FUNDS
+            - IDEMPOTENCY_MISMATCH
+            - INTERNAL
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+          description: Extra context. For INSUFFICIENT_FUNDS this carries the account, asset, available and requested.

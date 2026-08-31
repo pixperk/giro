@@ -28,6 +28,23 @@ _migrate CMD:
 migrate-test:
     @DATABASE_URL="$GIRO_TEST_DATABASE_URL" go run ./cmd/giro migrate up
 
+# --- api ---
+
+# regenerate the go types from the openapi contract.
+#
+# run with a version suffix rather than a tool directive in go.mod, so the
+# generator and its own dependency tree stay out of this module entirely. the
+# generated file is committed; ci checks it is not stale.
+generate:
+    @go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 \
+        -config api/codegen.yaml api/openapi.yaml
+    @gofmt -w internal/api/gen.go
+    @echo "regenerated internal/api/gen.go"
+
+# serve the api, with docs at /docs
+serve:
+    @go run ./cmd/giro serve
+
 # --- development ------------------------------------------------------------
 
 # run every test with the race detector
