@@ -117,7 +117,13 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 	if timestamp.IsZero() {
 		timestamp = time.Now()
 	}
-	timestamp = timestamp.UTC()
+	// postgres timestamptz holds microseconds. truncating here means the value
+	// we return is the value that was stored, rather than one carrying
+	// precision the database silently drops on the way in.
+	//
+	// this is invisible on macos, whose clock is already microsecond granular,
+	// and shows up immediately on linux.
+	timestamp = timestamp.UTC().Truncate(time.Microsecond)
 
 	alloc, err := s.allocate(ctx, tx)
 	if err != nil {

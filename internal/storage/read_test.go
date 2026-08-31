@@ -2,6 +2,7 @@ package storage
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pixperk/giro/internal/ledger"
 )
@@ -314,5 +315,40 @@ func TestGetVolumesIsScopedToItsLedger(t *testing.T) {
 		t.Fatal(err)
 	} else if got["USD/2"].Input.Cmp(n(9999)) != 0 {
 		t.Errorf("their alice input = %s, want 9999", got["USD/2"].Input)
+	}
+}
+
+// postgres timestamptz holds microseconds, so a nanosecond precision timestamp
+// would be silently rounded on the way in and the create response would
+// disagree with every later read.
+//
+// this is written with an explicit nanosecond value rather than time.Now()
+// because macos clocks are microsecond granular: using the wall clock, this
+// test can only fail on linux.
+func TestTimestampsSurviveTheRoundTrip(t *testing.T) {
+	ctx, s, _ := testStore(t)
+
+	given := time.Date(2026, 3, 1, 12, 0, 0, 123456789, time.UTC)
+
+	created, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(100)},
+	}, CommitOptions{Timestamp: given})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sub := created.Timestamp.Nanosecond() % 1000; sub != 0 {
+		t.Errorf("returned timestamp keeps %d sub-microsecond nanoseconds, which postgres cannot store", sub)
+	}
+
+	read, err := s.GetTransaction(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.Timestamp.Equal(created.Timestamp) {
+		t.Errorf("read back %v, create returned %v", read.Timestamp, created.Timestamp)
+	}
+	if !read.InsertedAt.Equal(created.InsertedAt) {
+		t.Errorf("inserted_at read back %v, create returned %v", read.InsertedAt, created.InsertedAt)
 	}
 }
