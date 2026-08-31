@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"math/big"
 	"net/http"
 	"strings"
@@ -656,5 +657,85 @@ func TestRevertAtEffectiveDateOverHTTP(t *testing.T) {
 	}
 	if got := decode[Reversal](t, rec); !got.Reversal.Timestamp.Equal(original.Timestamp) {
 		t.Errorf("reversal dated %v, want the original's %v", got.Reversal.Timestamp, original.Timestamp)
+	}
+}
+
+func TestBalancesAsOfADate(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	commit := func(from, to string, amount int64, day int) {
+		t.Helper()
+		rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+			"postings":  []map[string]any{posting(from, to, "USD/2", amount)},
+			"timestamp": fmt.Sprintf("2026-03-%02dT12:00:00Z", day),
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatal(rec.Body.String())
+		}
+	}
+
+	commit("world", "alice", 100, 1)
+	commit("world", "alice", 50, 3)
+	commit("alice", "bob", 30, 5)
+	commit("world", "alice", 50, 2) // a settlement file arriving late
+
+	for _, tc := range []struct {
+		day  int
+		want int64
+	}{{1, 100}, {2, 150}, {3, 200}, {5, 170}} {
+		at := fmt.Sprintf("2026-03-%02dT12:00:00Z", tc.day)
+		got := decode[Balances](t, do(t, s, http.MethodGet,
+			base+"/accounts/alice/balances?at="+at, nil))
+		if got["USD/2"].Cmp(big.NewInt(tc.want)) != 0 {
+			t.Errorf("balance on day %d = %s, want %d", tc.day, got["USD/2"], tc.want)
+		}
+	}
+
+	// with no date it is the current view, which is the same total here but
+	// reached by a different route
+	now := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/alice/balances", nil))
+	if now["USD/2"].Cmp(big.NewInt(170)) != 0 {
+		t.Errorf("current balance = %s, want 170", now["USD/2"])
+	}
+}
+
+func TestExpandEffectiveVolumes(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 10000)
+
+	a := decode[Account](t, do(t, s, http.MethodGet,
+		base+"/accounts/users:alice?expand=volumes,effectiveVolumes", nil))
+	if a.Volumes == nil || a.EffectiveVolumes == nil {
+		t.Fatalf("volumes %v, effectiveVolumes %v", a.Volumes, a.EffectiveVolumes)
+	}
+	if (*a.EffectiveVolumes)["USD/2"].Input.Cmp(big.NewInt(10000)) != 0 {
+		t.Errorf("effective volumes = %v", *a.EffectiveVolumes)
+	}
+
+	// neither is present unless asked for
+	plain := decode[Account](t, do(t, s, http.MethodGet, base+"/accounts/users:alice", nil))
+	if plain.Volumes != nil || plain.EffectiveVolumes != nil {
+		t.Error("volumes returned without being asked for")
+	}
+}
+
+func TestBadEffectiveDateIsRejected(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 100)
+
+	for _, path := range []string{
+		base + "/accounts/users:alice/balances?at=yesterday",
+		base + "/accounts/users:alice?expand=effectiveVolumes&at=2026-13-45",
+	} {
+		rec := do(t, s, http.MethodGet, path, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", path, rec.Code)
+		}
+		if got := decode[Error](t, rec).Code; got != VALIDATION {
+			t.Errorf("code = %s", got)
+		}
 	}
 }

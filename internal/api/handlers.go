@@ -1,10 +1,12 @@
 package api
 
 import (
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pixperk/giro/internal/storage"
 )
@@ -106,6 +108,11 @@ func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	at, ok := effectiveDate(w, params)
+	if !ok {
+		return
+	}
+
 	var opts []storage.AccountOption
 
 	// unrecognised expansions are an error rather than silently ignored, so a
@@ -115,10 +122,12 @@ func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
 		case "":
 		case "volumes":
 			opts = append(opts, storage.WithVolumes())
+		case "effectiveVolumes":
+			opts = append(opts, storage.WithEffectiveVolumes(at))
 		default:
 			writeJSON(w, http.StatusBadRequest, Error{
 				Code:    VALIDATION,
-				Message: "unknown expand value " + strconv.Quote(want) + ", only \"volumes\" is supported",
+				Message: "unknown expand value " + strconv.Quote(want) + ", want volumes or effectiveVolumes",
 			})
 			return
 		}
@@ -133,12 +142,50 @@ func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBalances(w http.ResponseWriter, r *http.Request) {
-	balances, err := s.store(r.PathValue("ledger")).GetBalances(r.Context(), r.PathValue("address"))
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	at, ok := effectiveDate(w, params)
+	if !ok {
+		return
+	}
+
+	store := s.store(r.PathValue("ledger"))
+	address := r.PathValue("address")
+
+	// asking for a date reads the effective view, which differs from the
+	// current one whenever something has been backdated.
+	var balances map[string]*big.Int
+	var err error
+	if at.IsZero() {
+		balances, err = store.GetBalances(r.Context(), address)
+	} else {
+		balances, err = store.GetBalancesAt(r.Context(), address, at)
+	}
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toAPIBalances(balances))
+}
+
+// zero means now, which the caller reads as the current view rather than a
+// historical one. a present but unparseable date is an error.
+func effectiveDate(w http.ResponseWriter, params url.Values) (time.Time, bool) {
+	raw := params.Get("at")
+	if raw == "" {
+		return time.Time{}, true
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{
+			Code:    VALIDATION,
+			Message: "at must be an RFC 3339 timestamp, for example 2026-03-01T12:00:00Z",
+		})
+		return time.Time{}, false
+	}
+	return at, true
 }
 
 func (s *Server) aggregateBalances(w http.ResponseWriter, r *http.Request) {

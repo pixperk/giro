@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -142,7 +143,11 @@ func (s *Store) AggregateBalances(ctx context.Context, prefix string) (map[strin
 	return out, rows.Err()
 }
 
-type accountOptions struct{ volumes bool }
+type accountOptions struct {
+	volumes          bool
+	effectiveVolumes bool
+	at               time.Time
+}
 
 type AccountOption func(*accountOptions)
 
@@ -154,6 +159,16 @@ type AccountOption func(*accountOptions)
 // not its money.
 func WithVolumes() AccountOption {
 	return func(o *accountOptions) { o.volumes = true }
+}
+
+// WithEffectiveVolumes attaches what the account held as of a date, in
+// effective date order, which differs from the current view whenever a
+// transaction has been backdated. a zero time means now.
+func WithEffectiveVolumes(at time.Time) AccountOption {
+	return func(o *accountOptions) {
+		o.effectiveVolumes = true
+		o.at = at
+	}
 }
 
 func (s *Store) GetAccount(ctx context.Context, address string, opts ...AccountOption) (*ledger.Account, error) {
@@ -188,6 +203,15 @@ func (s *Store) GetAccount(ctx context.Context, address string, opts ...AccountO
 
 	if o.volumes {
 		if a.Volumes, err = s.GetVolumes(ctx, address); err != nil {
+			return nil, err
+		}
+	}
+	if o.effectiveVolumes {
+		at := o.at
+		if at.IsZero() {
+			at = time.Now()
+		}
+		if a.EffectiveVolumes, err = s.GetEffectiveVolumesAt(ctx, address, at); err != nil {
 			return nil, err
 		}
 	}

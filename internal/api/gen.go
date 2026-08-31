@@ -69,6 +69,10 @@ type Account struct {
 	// Address Example: users:alice
 	Address string `json:"address"`
 
+	// EffectiveVolumes What the account held as of `at`, in effective date order. Present
+	// only with `expand=effectiveVolumes`.
+	EffectiveVolumes *map[string]Volumes `json:"effectiveVolumes,omitempty"`
+
 	// FirstUsage Earliest effective date this account has been involved in. A backdated transaction can move it earlier.
 	FirstUsage    time.Time `json:"firstUsage"`
 	InsertionDate time.Time `json:"insertionDate"`
@@ -84,7 +88,7 @@ type Account struct {
 	Metadata  *Metadata `json:"metadata,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 
-	// Volumes Present only when requested with `expand=volumes`.
+	// Volumes What the account holds now. Present only with `expand=volumes`.
 	Volumes *map[string]Volumes `json:"volumes,omitempty"`
 }
 
@@ -275,6 +279,9 @@ type Volumes struct {
 // Address defines model for Address.
 type Address = string
 
+// At defines model for At.
+type At = time.Time
+
 // Cursor defines model for Cursor.
 type Cursor = string
 
@@ -301,9 +308,28 @@ type NotFound = Error
 
 // GetAccountParams defines parameters for GetAccount.
 type GetAccountParams struct {
-	// Expand Comma separated extras to include. Only `volumes` is supported.
-	// Omitted by default because it costs a second query.
+	// Expand Comma separated extras to include: `volumes`, `effectiveVolumes`.
+	// Omitted by default because each costs a second query.
+	//
+	// `volumes` is what the account holds now. `effectiveVolumes` is what
+	// it held as of `at`, which differs whenever a transaction has been
+	// backdated.
 	Expand *string `form:"expand,omitempty" json:"expand,omitempty"`
+
+	// At An effective date. Answers what was true on that date rather than what
+	// is true now, which differs whenever a transaction has been backdated.
+	//
+	// Defaults to now.
+	At *At `form:"at,omitempty" json:"at,omitempty"`
+}
+
+// GetBalancesParams defines parameters for GetBalances.
+type GetBalancesParams struct {
+	// At An effective date. Answers what was true on that date rather than what
+	// is true now, which differs whenever a transaction has been backdated.
+	//
+	// Defaults to now.
+	At *At `form:"at,omitempty" json:"at,omitempty"`
 }
 
 // AggregateBalancesParams defines parameters for AggregateBalances.

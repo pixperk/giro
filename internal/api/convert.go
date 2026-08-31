@@ -85,11 +85,20 @@ func toAPIAccount(a *ledger.Account) Account {
 		out.Metadata = &m
 	}
 	if a.Volumes != nil {
-		v := map[string]Volumes{}
-		for asset, vol := range a.Volumes {
-			v[asset] = toAPIVolumes(vol)
-		}
+		v := volumesMap(a.Volumes)
 		out.Volumes = &v
+	}
+	if a.EffectiveVolumes != nil {
+		v := volumesMap(a.EffectiveVolumes)
+		out.EffectiveVolumes = &v
+	}
+	return out
+}
+
+func volumesMap(in map[string]ledger.Volumes) map[string]Volumes {
+	out := make(map[string]Volumes, len(in))
+	for asset, v := range in {
+		out[asset] = toAPIVolumes(v)
 	}
 	return out
 }

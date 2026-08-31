@@ -14,6 +14,17 @@ info:
     `world` is the only account permitted a negative balance, so for any asset
     every balance summed together is always exactly zero.
 
+    ### Two clocks
+
+    A transaction carries `timestamp`, when it happened economically, and
+    `insertedAt`, when this database learned of it. They disagree whenever news
+    arrives late, which for anything touching the outside world is most of the
+    time.
+
+    So there are two views of an account. What it holds **now**, and what it
+    held **as of a date**, which is what `?at=` asks for. The second changes
+    when a transaction is backdated; the first does not.
+
     ### Amounts
 
     Amounts are arbitrary precision integers in the asset's smallest unit, sent
@@ -292,9 +303,14 @@ paths:
         - name: expand
           in: query
           description: |
-            Comma separated extras to include. Only `volumes` is supported.
-            Omitted by default because it costs a second query.
+            Comma separated extras to include: `volumes`, `effectiveVolumes`.
+            Omitted by default because each costs a second query.
+
+            `volumes` is what the account holds now. `effectiveVolumes` is what
+            it held as of `at`, which differs whenever a transaction has been
+            backdated.
           schema: { type: string }
+        - $ref: "#/components/parameters/At"
       responses:
         "200":
           description: OK
@@ -316,6 +332,8 @@ paths:
         An address that has never been touched returns an empty object rather
         than a 404: its balance is zero either way.
       operationId: getBalances
+      parameters:
+        - $ref: "#/components/parameters/At"
       responses:
         "200":
           description: OK
@@ -388,6 +406,15 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    At:
+      name: at
+      in: query
+      description: |
+        An effective date. Answers what was true on that date rather than what
+        is true now, which differs whenever a transaction has been backdated.
+
+        Defaults to now.
+      schema: { type: string, format: date-time }
     MetadataKey:
       name: key
       in: path
@@ -562,7 +589,13 @@ components:
         updatedAt: { type: string, format: date-time }
         volumes:
           type: object
-          description: Present only when requested with `expand=volumes`.
+          description: What the account holds now. Present only with `expand=volumes`.
+          additionalProperties: { $ref: "#/components/schemas/Volumes" }
+        effectiveVolumes:
+          type: object
+          description: |
+            What the account held as of `at`, in effective date order. Present
+            only with `expand=effectiveVolumes`.
           additionalProperties: { $ref: "#/components/schemas/Volumes" }
 
     RevertRequest:

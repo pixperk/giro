@@ -15,7 +15,11 @@ type Account struct {
 	InsertionDate time.Time `json:"insertionDate"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 
-	// asset -> volumes. only populated by reads that ask for it, since it is a
-	// second query.
-	Volumes map[string]Volumes `json:"volumes,omitempty"`
+	// asset -> volumes. only populated by reads that ask for it, since each is
+	// a second query.
+	//
+	// Volumes is what the account holds now. EffectiveVolumes is what it held
+	// as of a date, which differs whenever a transaction has been backdated.
+	Volumes          map[string]Volumes `json:"volumes,omitempty"`
+	EffectiveVolumes map[string]Volumes `json:"effectiveVolumes,omitempty"`
 }

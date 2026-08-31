@@ -54,12 +54,7 @@ func bigInt(n pgtype.Numeric) (*big.Int, error) {
 // ORDER BY, because the planner is not obliged to lock in the order rows were
 // listed.
 func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.VolumeUpdate) (map[key]ledger.Volumes, error) {
-	addresses := make([]string, len(updates))
-	assets := make([]string, len(updates))
-	for i, u := range updates {
-		addresses[i] = u.Account
-		assets[i] = u.Asset
-	}
+	addresses, assets := pairs(updates)
 
 	// you cannot lock a row that does not exist, and FOR UPDATE on a missing
 	// row silently locks nothing rather than failing. materialise the zero
