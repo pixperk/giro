@@ -22,6 +22,12 @@ type CommitOptions struct {
 	// the caller's own identifier, unique per ledger when present.
 	Reference string
 	Metadata  ledger.Metadata
+
+	// replaying this key returns the original transaction instead of creating
+	// a second one. a network timeout after the server committed looks exactly
+	// like a request that never arrived, so every write endpoint is eventually
+	// called twice.
+	IdempotencyKey string
 }
 
 // postgres can still deadlock through index and foreign key locks that sorted
@@ -43,8 +49,13 @@ func (s *Store) CommitTransaction(ctx context.Context, p ledger.Postings, opts C
 		return nil, &PostingError{Index: i, Err: err}
 	}
 
+	ikHash, err := idempotencyHash(p, opts)
+	if err != nil {
+		return nil, err
+	}
+
 	for attempt := range maxAttempts {
-		tx, err := s.commitOnce(ctx, p, opts)
+		tx, err := s.commitOnce(ctx, p, opts, ikHash, attempt)
 		if err == nil {
 			return tx, nil
 		}
@@ -59,7 +70,7 @@ func (s *Store) CommitTransaction(ctx context.Context, p ledger.Postings, opts C
 	return nil, fmt.Errorf("giving up after %d attempts, contention on ledger %q", maxAttempts, s.ledger)
 }
 
-func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOptions) (*ledger.Transaction, error) {
+func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOptions, ikHash string, attempt int) (*ledger.Transaction, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin: %w", err)
@@ -67,6 +78,19 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 	// no-op once Commit has run. this is the only path that undoes the zero
 	// volume rows created while taking locks.
 	defer tx.Rollback(ctx)
+
+	// fast path for a replayed request. the unique index on the key is what
+	// makes this correct under a race: two concurrent replays can both miss
+	// here, and the loser is caught at insert time below.
+	if opts.IdempotencyKey != "" {
+		existing, err := s.findByIdempotencyKey(ctx, tx, opts.IdempotencyKey, ikHash)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return existing, nil
+		}
+	}
 
 	// already sorted by (account, asset) in the domain layer. that ordering is
 	// the lock order, and it is deterministic across processes.
@@ -95,13 +119,13 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 	}
 	timestamp = timestamp.UTC()
 
-	id, err := s.allocateTransactionID(ctx, tx)
+	alloc, err := s.allocate(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
 	transaction := &ledger.Transaction{
-		ID:                id,
+		ID:                alloc.transactionID,
 		Postings:          p,
 		Timestamp:         timestamp,
 		Reference:         opts.Reference,
@@ -117,6 +141,21 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 	}
 	if err := s.insertMoves(ctx, tx, transaction, before); err != nil {
 		return nil, err
+	}
+
+	// the log entry goes in last, still inside the same transaction, so the
+	// log and the projection it describes either both land or neither does.
+	if err := s.appendLog(ctx, tx, transaction, alloc, opts.IdempotencyKey, ikHash); err != nil {
+		if replayed, e := s.idempotencyRace(ctx, opts.IdempotencyKey, ikHash, err); replayed != nil || e != nil {
+			return replayed, e
+		}
+		return nil, err
+	}
+
+	if s.beforeCommit != nil {
+		if err := s.beforeCommit(attempt); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -165,18 +204,71 @@ func postCommitVolumes(before map[key]ledger.Volumes, updates []ledger.VolumeUpd
 	return out
 }
 
-func (s *Store) allocateTransactionID(ctx context.Context, tx pgx.Tx) (int64, error) {
-	var id int64
-	err := tx.QueryRow(ctx,
-		`update ledgers set last_tx_id = last_tx_id + 1 where name = $1 returning last_tx_id`,
-		s.ledger).Scan(&id)
+type allocation struct {
+	transactionID int64
+	logID         int64
+	previousHash  []byte
+}
+
+// one statement takes both counters and the chain tip, from a row this
+// transaction already holds an exclusive lock on. ids come from a counter
+// rather than a sequence so a rollback un-allocates them and the log has no
+// gaps, which is what makes a missing entry detectable during verification.
+func (s *Store) allocate(ctx context.Context, tx pgx.Tx) (allocation, error) {
+	var a allocation
+	err := tx.QueryRow(ctx, `
+		update ledgers
+		   set last_tx_id = last_tx_id + 1,
+		       last_log_id = last_log_id + 1
+		 where name = $1
+		returning last_tx_id, last_log_id, last_log_hash`,
+		s.ledger).Scan(&a.transactionID, &a.logID, &a.previousHash)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("%w: %q", ErrLedgerNotFound, s.ledger)
+		return a, fmt.Errorf("%w: %q", ErrLedgerNotFound, s.ledger)
 	}
 	if err != nil {
-		return 0, fmt.Errorf("allocate transaction id: %w", err)
+		return a, fmt.Errorf("allocate ids: %w", err)
 	}
-	return id, nil
+	return a, nil
+}
+
+// serialise the transaction once, hash those exact bytes, store both.
+func (s *Store) appendLog(ctx context.Context, tx pgx.Tx, t *ledger.Transaction, a allocation, key, ikHash string) error {
+	data, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+
+	return s.insertLog(ctx, tx, &ledger.Log{
+		ID:              a.logID,
+		Type:            ledger.LogNewTransaction,
+		Date:            t.InsertedAt,
+		Data:            data,
+		Hash:            ledger.ChainHash(a.previousHash, data),
+		IdempotencyKey:  key,
+		IdempotencyHash: ikHash,
+	})
+}
+
+// two concurrent requests carrying the same idempotency key can both miss the
+// fast path. the unique index catches the loser here, and the right answer is
+// the winner's transaction rather than an error.
+func (s *Store) idempotencyRace(ctx context.Context, key, ikHash string, err error) (*ledger.Transaction, error) {
+	if key == "" {
+		return nil, nil
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != uniqueViolation {
+		return nil, nil
+	}
+
+	tx, beginErr := s.pool.Begin(ctx)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	return s.findByIdempotencyKey(ctx, tx, key, ikHash)
 }
 
 func (s *Store) insertTransaction(ctx context.Context, tx pgx.Tx, t *ledger.Transaction) error {
@@ -208,6 +300,7 @@ func (s *Store) insertTransaction(ctx context.Context, tx pgx.Tx, t *ledger.Tran
 		endpoints(t.Postings, func(p ledger.Posting) string { return p.Destination }),
 		pcv,
 	).Scan(&t.InsertedAt)
+	t.InsertedAt = t.InsertedAt.UTC()
 
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -331,8 +424,14 @@ func retryable(err error) bool {
 }
 
 func backoff(ctx context.Context, attempt int) error {
-	// jittered, so retries from a thundering herd do not line up again
-	d := time.Duration(1<<attempt)*time.Millisecond + time.Duration(rand.IntN(2000))*time.Microsecond
+	// jitter is proportional rather than a flat span, so it spreads a
+	// thundering herd at every scale and the windows stay ordered: attempt n
+	// waits somewhere in [base, 2*base), and 2*base for one attempt is exactly
+	// the base of the next, so a later retry never waits less than an earlier
+	// one. flat jitter overlaps the early windows and does nothing for the
+	// late ones.
+	base := time.Duration(1<<attempt) * time.Millisecond
+	d := base + time.Duration(rand.Int64N(int64(base)))
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

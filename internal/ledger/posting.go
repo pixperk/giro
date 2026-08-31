@@ -39,8 +39,10 @@ const maxAmountBits = 333
 // Amount is always positive. direction is already carried by which field an
 // account sits in, so a sign would be a second way of saying the same thing.
 type Posting struct {
-	Source, Destination, Asset string
-	Amount                     *big.Int
+	Source      string   `json:"source"`
+	Destination string   `json:"destination"`
+	Asset       string   `json:"asset"`
+	Amount      *big.Int `json:"amount"`
 }
 
 // a transaction is an ordered list of postings applied atomically. the order

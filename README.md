@@ -72,9 +72,9 @@ product.
 |---|---|---|
 | 1 | Domain types, validation, volume aggregation | done |
 | 2 | Schema and migration runner | done |
-| 3 | Commit path: sorted row locks, balance checks | next |
-| 4 | Hash chain and idempotency | |
-| 5 | HTTP API | |
+| 3 | Commit path: sorted row locks, balance checks | done |
+| 4 | Hash chain and idempotency | done |
+| 5 | HTTP API | next |
 | 6 | Revert and versioned metadata | |
 | 7 | Effective dates and backdating | |
 | 8 | Invariant tests | |

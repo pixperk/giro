@@ -13,7 +13,8 @@ import (
 // settled millions and now holds nothing is distinguishable from one that was
 // never used, and it makes every update relative rather than absolute.
 type Volumes struct {
-	Input, Output *big.Int
+	Input  *big.Int `json:"input"`
+	Output *big.Int `json:"output"`
 }
 
 // zero value Volumes is usable: a nil counter means nothing has flowed, which

@@ -27,6 +27,17 @@ type Store struct {
 	// that a missing FOR UPDATE is usually invisible. widening that gap is the
 	// only way a test can tell the lock is doing the work rather than luck.
 	afterLock func()
+
+	// test seam, called just before COMMIT with the attempt number, zero based.
+	// returning an error aborts that attempt.
+	//
+	// the retry loop is the code that runs when things go wrong, and it is
+	// close to impossible to provoke on demand: the sorted single statement
+	// lock means a commit is never the deadlock victim, because whichever
+	// transaction closes the cycle is the one postgres kills, and ours always
+	// acquires first and waits. injecting the failure is the only way to
+	// exercise the path that recovers from it.
+	beforeCommit func(attempt int) error
 }
 
 func New(pool *pgxpool.Pool, ledgerName string) *Store {
