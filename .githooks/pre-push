@@ -1,0 +1,35 @@
+#!/bin/sh
+# the slow half. everything ci runs that needs a database.
+# skip with: git push --no-verify
+set -e
+
+# hooks do not inherit your shell, so the connection strings come from .env
+if [ -f .env ]; then
+	set -a
+	. ./.env
+	set +a
+fi
+
+if [ -z "$GIRO_TEST_DATABASE_URL" ]; then
+	echo "pre-push: GIRO_TEST_DATABASE_URL is not set and no .env was found"
+	exit 1
+fi
+
+if ! pg_isready -q 2>/dev/null; then
+	echo "pre-push: postgres is not accepting connections"
+	echo "  start it with: brew services start postgresql@17"
+	exit 1
+fi
+
+echo "pre-push: go test -race -shuffle=on"
+go test -race -shuffle=on ./...
+
+echo "pre-push: migrations apply to an empty database"
+tmpdb="giro_prepush_$$"
+createdb "$tmpdb"
+trap 'dropdb --if-exists "$tmpdb" >/dev/null 2>&1' EXIT
+
+DATABASE_URL="$(echo "$GIRO_TEST_DATABASE_URL" | sed "s|/[^/]*$|/$tmpdb|")" \
+	go run ./cmd/giro migrate up
+
+echo "pre-push: ok"

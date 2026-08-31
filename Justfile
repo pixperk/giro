@@ -69,6 +69,12 @@ build:
     @mkdir -p bin
     go build -o bin/giro ./cmd/giro
 
+# install the git hooks. pre-commit runs fmt, vet and lint. pre-push runs the
+# tests and checks migrations still apply to an empty database.
+hooks:
+    @git config core.hooksPath .githooks
+    @echo "hooks installed, skip any of them with --no-verify"
+
 # --- database ---------------------------------------------------------------
 
 # psql against the dev database

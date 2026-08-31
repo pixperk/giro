@@ -1,0 +1,25 @@
+#!/bin/sh
+# fast checks only, so this stays out of the way. the test suite runs on push.
+# skip with: git commit --no-verify
+set -e
+
+echo "pre-commit: gofmt"
+unformatted=$(gofmt -l . 2>/dev/null)
+if [ -n "$unformatted" ]; then
+	echo "  not gofmt clean:"
+	echo "$unformatted" | sed 's/^/    /'
+	echo "  fix with: just fmt"
+	exit 1
+fi
+
+echo "pre-commit: go vet"
+go vet ./...
+
+if command -v golangci-lint >/dev/null 2>&1; then
+	echo "pre-commit: golangci-lint"
+	golangci-lint run ./...
+else
+	echo "pre-commit: golangci-lint not installed, skipping (brew install golangci-lint)"
+fi
+
+echo "pre-commit: ok"
