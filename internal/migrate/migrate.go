@@ -23,8 +23,18 @@ const (
 	lockKeyMigrations int32 = 1
 )
 
-// a stuck migration should fail the boot rather than hang it forever.
-const lockTimeout = "30s"
+// a stuck migration should fail the boot rather than hang it forever. the
+// statement timeout bounds waits taken by the migrations themselves, where
+// ddl queues behind a long running query; lockWait bounds how long this
+// process will wait for another one to finish migrating.
+const (
+	lockTimeout = "30s"
+	lockPoll    = 100 * time.Millisecond
+)
+
+// a var so the timeout path can be tested in milliseconds rather than in half
+// a minute.
+var lockWait = 30 * time.Second
 
 const createTable = `
 create table if not exists schema_migrations (
@@ -72,7 +82,7 @@ func Run(ctx context.Context, conn *pgx.Conn, fsys fs.FS) (n int, err error) {
 		return 0, fmt.Errorf("set lock_timeout: %w", err)
 	}
 
-	if _, err := conn.Exec(ctx, "select pg_advisory_lock($1, $2)", lockKeyApp, lockKeyMigrations); err != nil {
+	if err := acquireAdvisoryLock(ctx, conn); err != nil {
 		return 0, fmt.Errorf("acquire advisory lock: %w", err)
 	}
 	defer func() {
@@ -103,6 +113,44 @@ func Run(ctx context.Context, conn *pgx.Conn, fsys fs.FS) (n int, err error) {
 	}
 
 	return n, nil
+}
+
+// polled rather than blocked on, which is not the obvious way to wait.
+//
+// pg_advisory_lock would park this session in a lock wait, and a session in a
+// lock wait still holds a virtual transaction id. create index concurrently,
+// which the no-transaction directive exists to allow, waits for every virtual
+// transaction that was live when it started. so a runner holding the lock and
+// building an index waits for a runner waiting for the lock, and postgres
+// breaks the cycle by killing the waiter. two instances booting at once is
+// exactly the case the lock is here for, and it would fail there.
+//
+// polling has no such edge. between attempts this session holds nothing, so
+// there is no cycle to detect and the index build sees no transaction to wait
+// on. the cost is up to one poll interval of latency after the lock frees.
+func acquireAdvisoryLock(ctx context.Context, conn *pgx.Conn) error {
+	ctx, cancel := context.WithTimeout(ctx, lockWait)
+	defer cancel()
+
+	for {
+		var got bool
+		err := conn.QueryRow(ctx,
+			"select pg_try_advisory_lock($1, $2)", lockKeyApp, lockKeyMigrations).Scan(&got)
+		switch {
+		case got:
+			return nil
+		case ctx.Err() != nil:
+			return fmt.Errorf("waited %s for another migration to finish", lockWait)
+		case err != nil:
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waited %s for another migration to finish", lockWait)
+		case <-time.After(lockPoll):
+		}
+	}
 }
 
 // releasing is checked rather than fired and forgotten.

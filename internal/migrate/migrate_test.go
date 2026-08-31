@@ -730,3 +730,90 @@ func TestNewNamesInUTC(t *testing.T) {
 		t.Errorf("named %s, want the utc instant 20260228210000", got)
 	}
 }
+
+// create index concurrently waits for every transaction that was already
+// running when it started, and a runner blocked on the migration lock is one
+// of them: it holds a virtual transaction id while it waits. so the holder
+// waits for the waiter and the waiter waits for the holder, and postgres
+// resolves the cycle by killing the waiter.
+//
+// that is a boot failure in the one situation the lock exists for, two
+// instances starting at once, and it only appears when a migration uses the
+// no-transaction directive. acquiring by polling rather than blocking removes
+// the cycle: between attempts the waiter holds nothing at all.
+func TestConcurrentIndexDoesNotDeadlockAWaitingRunner(t *testing.T) {
+	ctx, conn, schema := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_table.sql": "create table widgets (id int);",
+		// its own file: multiple statements in one exec run inside an implicit
+		// transaction block, which create index concurrently refuses.
+		"20260101000002_slow.sql": "select pg_sleep(1);",
+		"20260101000003_index.sql": noTransactionDirective +
+			"\ncreate index concurrently widgets_id on widgets (id);",
+	})
+
+	held := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		c, err := pgx.Connect(ctx, testURL())
+		if err != nil {
+			done <- err
+			return
+		}
+		defer c.Close(ctx)
+		if _, err := c.Exec(ctx, "set search_path to "+schema); err != nil {
+			done <- err
+			return
+		}
+		close(held)
+		_, err = Run(ctx, c, root.FS())
+		done <- err
+	}()
+
+	// let the first runner take the lock and reach pg_sleep, so this one is
+	// already waiting when create index concurrently begins.
+	<-held
+	time.Sleep(300 * time.Millisecond)
+
+	if _, err := Run(ctx, conn, root.FS()); err != nil {
+		t.Errorf("waiting runner: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("holding runner: %v", err)
+	}
+}
+
+// a migration that never finishes must fail the boot rather than hang it, so
+// the wait has an end and says what it was waiting for.
+func TestLockWaitTimesOut(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql": "create table first (id int);",
+	})
+
+	holder, err := pgx.Connect(ctx, testURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	if _, err := holder.Exec(ctx,
+		"select pg_advisory_lock($1, $2)", lockKeyApp, lockKeyMigrations); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Exec(ctx, "select pg_advisory_unlock($1, $2)", lockKeyApp, lockKeyMigrations)
+
+	defer func(d time.Duration) { lockWait = d }(lockWait)
+	lockWait = 250 * time.Millisecond
+
+	start := time.Now()
+	_, err = Run(ctx, conn, root.FS())
+	if err == nil {
+		t.Fatal("acquired a lock another session holds")
+	}
+	if !strings.Contains(err.Error(), "another migration") {
+		t.Errorf("err = %v, want it to name what it waited for", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("waited %s, want it bounded by lockWait", elapsed)
+	}
+}

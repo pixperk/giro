@@ -328,6 +328,15 @@ pooled connection returns false and does nothing, leaving the lock held until
 that connection happens to close. The signature takes `*pgx.Conn` so the type
 system enforces this.
 
+The lock is acquired by polling `pg_try_advisory_lock` rather than by blocking
+on `pg_advisory_lock`. A session parked in a lock wait still holds a virtual
+transaction id, and `create index concurrently` waits for every virtual
+transaction that was live when it started. A runner holding the lock and
+building an index therefore waits for a runner waiting for the lock, and
+Postgres breaks the cycle by killing the waiter. That is a boot failure in the
+exact case the lock exists for. Polling has no such edge: between attempts the
+waiting session holds nothing, at a cost of one poll interval of latency.
+
 ### D12. A nil amount panics instead of being read as zero
 
 A nil counter in `Volumes` means nothing has flowed, so it is safely treated as
