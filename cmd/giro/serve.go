@@ -15,12 +15,20 @@ import (
 )
 
 const serveUsage = `usage:
-  giro serve [addr]     default :8080
+  giro serve [addr]     listen address, default :8080
+
+reads DATABASE_URL from the environment.
 `
 
 func serveCommand(ctx context.Context, args []string) error {
 	addr := ":8080"
-	if len(args) > 0 {
+	switch {
+	case len(args) > 1:
+		return usageErr{serveUsage}
+	case len(args) == 1:
+		if args[0] == "-h" || args[0] == "--help" {
+			return usageErr{serveUsage}
+		}
 		addr = args[0]
 	}
 
