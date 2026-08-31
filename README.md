@@ -66,21 +66,6 @@ product.
 
 ---
 
-## Status
-
-| Step | | |
-|---|---|---|
-| 1 | Domain types, validation, volume aggregation | done |
-| 2 | Schema and migration runner | done |
-| 3 | Commit path: sorted row locks, balance checks | done |
-| 4 | Hash chain and idempotency | done |
-| 5 | HTTP API | next |
-| 6 | Revert and versioned metadata | |
-| 7 | Effective dates and backdating | |
-| 8 | Invariant tests | |
-
----
-
 ## Running it
 
 Requires Go 1.26 and PostgreSQL 17.
@@ -89,10 +74,30 @@ Requires Go 1.26 and PostgreSQL 17.
 createdb giro && createdb giro_test
 cp .env.example .env          # then edit the connection strings
 just migrate
-just test
+just serve
 ```
 
-`just` on its own lists every recipe.
+Then open <http://localhost:8080/docs>, which renders the contract and can call
+the running service.
+
+`just` on its own lists every recipe. `just check` runs everything CI runs.
+
+### The api
+
+```
+POST   /v1/ledgers/{ledger}                          create a ledger
+POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header
+GET    /v1/ledgers/{ledger}/transactions             list, cursor paginated
+GET    /v1/ledgers/{ledger}/transactions/{id}
+GET    /v1/ledgers/{ledger}/accounts/{address}       ?expand=volumes
+GET    /v1/ledgers/{ledger}/accounts/{address}/balances
+GET    /v1/ledgers/{ledger}/balances                 ?prefix=users:
+GET    /v1/ledgers/{ledger}/logs                     the audit trail
+```
+
+`GET /v1/ledgers/{ledger}/balances` with no prefix covers the whole ledger,
+`world` included, so it is always exactly zero for every asset. That is the
+conservation invariant, readable over http.
 
 ---
 
@@ -190,8 +195,8 @@ end.
 
 ## Decision log
 
-Each entry states what was decided and why, and where useful, what would make
-us revisit it. Append as we go rather than rewriting history.
+Each entry states what was decided and why. If something here looks arbitrary,
+the reasoning is the point of the entry.
 
 ### D1. Postings name both sides, and amounts are always positive
 
@@ -248,15 +253,9 @@ writes per ledger, which we already pay for, because synchronous hash chaining
 has to read the previous hash before writing the next. The lock needed for the
 chain is the same lock that allocates the id, so gaplessness is free.
 
-**Revisit if** hashing moves to a background process, at which point the
-serialisation is no longer paid for and a sequence becomes the better trade.
-
-**Care needed when doing so.** Measured after step 3: this row lock serialises
-far more than intended, since it is held to commit and everything after id
-allocation therefore runs one transaction at a time per ledger. Removing the
-row lock without also verifying the concurrency tests still fail when
-`SELECT ... FOR UPDATE` is removed would drop a defence nothing is currently
-watching.
+The cost is real: this lock is held until commit, so writes to a single ledger
+are serialised. Writes to different ledgers are not, which is also how write
+throughput scales.
 
 ### D7. No foreign key referencing `ledgers`
 
@@ -373,14 +372,98 @@ useful.
 
 ---
 
+### D15. The contract is written first, and only models are generated
+
+`api/openapi.yaml` is the source of truth for the http surface, and the Go
+types in `internal/api/gen.go` are generated from it. Changing the request shape
+therefore shows up as a diff in the contract, deliberately made, rather than
+falling out of somebody editing a struct.
+
+Only models are generated. The same tool will also emit routing and query
+parameter binding, but that pulls three modules into the build to parse query
+strings, for a surface of eight endpoints on the standard library router. So
+routing is hand written, and what the compiler no longer checks a test does:
+every path in the contract must have a route, and every route must be in the
+contract.
+
+The generator itself is not a dependency. It runs from `just generate` with a
+pinned version, so it never enters `go.mod`. The only thing this service links
+against is a postgres driver.
+
+### D16. Amounts are json numbers, and the Go type is a pointer
+
+An amount goes over the wire as a json number rather than a string, matching how
+it is stored: an arbitrary precision integer in the asset's smallest unit.
+
+That has one consequence worth stating loudly, because it is a client side
+hazard rather than a server one. Amounts can exceed 2^53, and JavaScript's
+`JSON.parse` silently loses precision above that. A browser client must use a
+big number aware parser. The contract says so in its description.
+
+On the Go side the generated type is `*big.Int` and not `big.Int`, which is not
+a stylistic preference. `big.Int` implements `MarshalJSON` on the pointer
+receiver, and `encoding/json` can take the address of a struct field inside a
+slice but not of a map value. With a value type, amounts inside slices marshal
+correctly and every amount inside a map silently marshals as `{}`. Balances are
+maps.
+
+### D17. Errors carry a stable code, and 422 is not 400
+
+Every error response has a `code` from a fixed set, alongside the http status.
+The message is for humans and may change, the code is what a client branches on.
+
+400 and 422 are different answers. A 400 means the request was malformed: a
+negative amount, an address with a trailing space, a lowercase asset. A 422
+means the request was well formed and could not be applied, which in practice
+means insufficient funds. A client can fix the first by changing its code and
+the second only by changing the world, so they should not share a status.
+
+Insufficient funds carries the numbers in `details`, because an error a client
+can act on programmatically should not require parsing a sentence.
+
+Internal errors return a generic message. The real one goes to the log, since it
+can carry table names, queries and account addresses.
+
+### D18. Timestamps are truncated to microseconds
+
+Postgres stores `timestamptz` at microsecond precision. A timestamp with
+nanoseconds would be silently rounded on the way in, so the response to a create
+would disagree with every later read of the same transaction.
+
+Truncating at the boundary means the value returned is the value stored.
+
+### D19. Malformed query strings are rejected rather than ignored
+
+Go's `r.URL.Query()` discards any parameter it cannot parse, so a corrupted
+query string arrives at a handler as absent parameters. For a cursor that is
+dangerous: the client would silently receive the first page again and reprocess
+transactions it has already seen.
+
+Query strings are parsed explicitly, and anything unparseable is a 400.
+
+### D20. Expansions are opt in, and an unknown one is an error
+
+`GET /accounts/{address}` returns the account without its volumes, because most
+reads of an account want its metadata rather than its money, and volumes cost a
+second query. `?expand=volumes` asks for them.
+
+An unrecognised expand value is a 400 rather than being ignored, so a typo does
+not look like an account that happens to have no volumes.
+
+
 ## Layout
 
 ```
-cmd/giro/            cli: migrate up, status, new
+api/openapi.yaml     the contract. written first, types generated from it
+cmd/giro/            cli: serve, migrate
 internal/ledger/     domain: postings, volumes, addresses, assets. no sql
+internal/storage/    the commit path, the log chain, queries. no http
+internal/api/        handlers, error mapping, the docs page
 internal/migrate/    migration runner and generator
 migrations/          numbered sql, embedded into the binary
 ```
 
-The domain package knows nothing about SQL, and storage will know nothing about
-HTTP.
+Each layer knows nothing about the one above it. The domain has no sql, storage
+has no http, and the generated types in `internal/api/gen.go` come from the
+contract rather than from the domain, so the wire format can change without
+disturbing the engine.
