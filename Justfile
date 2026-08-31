@@ -30,11 +30,11 @@ migrate-test:
 
 # --- api ---
 
-# regenerate the go types from the openapi contract.
-#
 # run with a version suffix rather than a tool directive in go.mod, so the
-# generator and its own dependency tree stay out of this module entirely. the
-# generated file is committed; ci checks it is not stale.
+# generator and its dependency tree stay out of this module. the generated file
+# is committed and ci checks it is not stale.
+#
+# regenerate the go types from the openapi contract
 generate:
     @go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 \
         -config api/codegen.yaml api/openapi.yaml
@@ -86,8 +86,10 @@ build:
     @mkdir -p bin
     go build -o bin/giro ./cmd/giro
 
-# install the git hooks. pre-commit runs fmt, vet and lint. pre-push runs the
-# tests and checks migrations still apply to an empty database.
+# pre-commit runs fmt, vet and lint. pre-push runs the tests and checks
+# migrations still apply to an empty database.
+#
+# install the git hooks
 hooks:
     @git config core.hooksPath .githooks
     @echo "hooks installed, skip any of them with --no-verify"

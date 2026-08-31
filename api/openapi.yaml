@@ -292,7 +292,13 @@ components:
       format: bigint
       minimum: 0
       description: Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
-      x-go-type: big.Int
+      # a pointer, and not by preference.
+      #
+      # big.Int implements MarshalJSON on the pointer receiver. encoding/json
+      # can take the address of a struct field inside a slice, so a value type
+      # happens to work there, but map values are not addressable: Balances and
+      # the volumes maps would silently marshal as {} instead of a number.
+      x-go-type: "*big.Int"
       x-go-type-import:
         path: math/big
       example: 10000
@@ -420,7 +426,16 @@ components:
           enum: [NEW_TRANSACTION, REVERTED_TRANSACTION, SET_METADATA, DELETE_METADATA]
         date: { type: string, format: date-time }
         data:
-          description: The mutation, verbatim. These exact bytes are what the hash covers.
+          description: |
+            The mutation, verbatim. These exact bytes are what the hash covers.
+
+            Passed through untouched rather than re-encoded, because re-encoding
+            would not reproduce the bytes the hash was taken over, and decoding
+            through a generic type would route amounts via float64 and lose
+            precision above 2^53.
+          # no x-go-type-import: encoding/json is already imported by the
+          # generated file, and naming it again emits a duplicate import.
+          x-go-type: json.RawMessage
         hash:
           type: string
           format: byte

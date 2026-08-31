@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"math/big"
@@ -83,7 +84,7 @@ type Account struct {
 // Amount Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
 //
 // Example: 10000
-type Amount = big.Int
+type Amount = *big.Int
 
 // Balances Asset to balance. A balance may be negative only for `world`.
 //
@@ -126,8 +127,13 @@ type Ledger struct {
 // Log defines model for Log.
 type Log struct {
 	// Data The mutation, verbatim. These exact bytes are what the hash covers.
-	Data interface{} `json:"data"`
-	Date time.Time   `json:"date"`
+	//
+	// Passed through untouched rather than re-encoded, because re-encoding
+	// would not reproduce the bytes the hash was taken over, and decoding
+	// through a generic type would route amounts via float64 and lose
+	// precision above 2^53.
+	Data json.RawMessage `json:"data"`
+	Date time.Time       `json:"date"`
 
 	// Hash SHA-256 over the previous entry's hash and this entry's bytes.
 	Hash           []byte  `json:"hash"`

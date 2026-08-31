@@ -24,7 +24,22 @@ func NewServer(store func(ledger string) *storage.Store) *Server {
 	return s
 }
 
+// the patterns match the paths in api/openapi.yaml exactly. go 1.22 ServeMux
+// uses the same {name} wildcard syntax openapi does, so the two are directly
+// comparable, which is what routes_test.go checks.
 func (s *Server) routes() {
+	s.mux.HandleFunc("POST /v1/ledgers/{ledger}", s.createLedger)
+
+	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions", s.createTransaction)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions", s.listTransactions)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions/{id}", s.getTransaction)
+
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/accounts/{address}", s.getAccount)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/accounts/{address}/balances", s.getBalances)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/balances", s.aggregateBalances)
+
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/logs", s.listLogs)
+
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleSpec)
 	s.mux.HandleFunc("GET /docs", s.handleDocs)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)

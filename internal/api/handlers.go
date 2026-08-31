@@ -1,0 +1,221 @@
+package api
+
+import (
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/pixperk/giro/internal/storage"
+)
+
+func (s *Server) createLedger(w http.ResponseWriter, r *http.Request) {
+	store := s.store(r.PathValue("ledger"))
+
+	l, err := store.CreateLedger(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toAPILedger(l))
+}
+
+func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
+	var body CreateTransactionRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	opts := storage.CommitOptions{
+		// the header rather than the body, so it is not part of the hashed
+		// inputs: the same postings under a new key must hash the same.
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+	}
+	if body.Timestamp != nil {
+		opts.Timestamp = *body.Timestamp
+	}
+	if body.Reference != nil {
+		opts.Reference = *body.Reference
+	}
+	if body.Metadata != nil {
+		opts.Metadata = map[string]string(*body.Metadata)
+	}
+
+	store := s.store(r.PathValue("ledger"))
+	tx, err := store.CommitTransaction(r.Context(), fromAPIPostings(body.Postings), opts)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toAPITransaction(tx))
+}
+
+func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := intParam(w, params, "limit")
+	if !ok {
+		return
+	}
+
+	q := storage.ListTransactionsQuery{
+		Limit:  limit,
+		Cursor: params.Get("cursor"),
+		Filter: storage.TransactionFilter{
+			Account:       params.Get("account"),
+			AccountPrefix: params.Get("accountPrefix"),
+			Reference:     params.Get("reference"),
+		},
+	}
+
+	page, err := s.store(r.PathValue("ledger")).ListTransactions(r.Context(), q)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	out := TransactionPage{Items: make([]Transaction, 0, len(page.Items))}
+	for i := range page.Items {
+		out.Items = append(out.Items, toAPITransaction(&page.Items[i]))
+	}
+	if page.Next != "" {
+		out.Next = &page.Next
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{Code: VALIDATION, Message: "id must be an integer"})
+		return
+	}
+
+	tx, err := s.store(r.PathValue("ledger")).GetTransaction(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPITransaction(tx))
+}
+
+func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+
+	var opts []storage.AccountOption
+
+	// unrecognised expansions are an error rather than silently ignored, so a
+	// typo does not look like an empty result.
+	for _, want := range strings.Split(params.Get("expand"), ",") {
+		switch strings.TrimSpace(want) {
+		case "":
+		case "volumes":
+			opts = append(opts, storage.WithVolumes())
+		default:
+			writeJSON(w, http.StatusBadRequest, Error{
+				Code:    VALIDATION,
+				Message: "unknown expand value " + strconv.Quote(want) + ", only \"volumes\" is supported",
+			})
+			return
+		}
+	}
+
+	a, err := s.store(r.PathValue("ledger")).GetAccount(r.Context(), r.PathValue("address"), opts...)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIAccount(a))
+}
+
+func (s *Server) getBalances(w http.ResponseWriter, r *http.Request) {
+	balances, err := s.store(r.PathValue("ledger")).GetBalances(r.Context(), r.PathValue("address"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIBalances(balances))
+}
+
+func (s *Server) aggregateBalances(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+
+	balances, err := s.store(r.PathValue("ledger")).
+		AggregateBalances(r.Context(), params.Get("prefix"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIBalances(balances))
+}
+
+func (s *Server) listLogs(w http.ResponseWriter, r *http.Request) {
+	params, ok := query(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := intParam(w, params, "limit")
+	if !ok {
+		return
+	}
+
+	page, err := s.store(r.PathValue("ledger")).ListLogs(r.Context(), storage.ListLogsQuery{
+		Limit:  limit,
+		Cursor: params.Get("cursor"),
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	out := LogPage{Items: make([]Log, 0, len(page.Items))}
+	for _, l := range page.Items {
+		out.Items = append(out.Items, toAPILog(l))
+	}
+	if page.Next != "" {
+		out.Next = &page.Next
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// r.URL.Query() discards anything it cannot parse, so a corrupted query string
+// arrives at the handler as absent parameters. for a cursor that is dangerous:
+// the client silently gets the first page again and reprocesses transactions it
+// has already seen. parse once, and reject rather than guess.
+func query(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{
+			Code:    VALIDATION,
+			Message: "malformed query string: " + err.Error(),
+		})
+		return nil, false
+	}
+	return values, true
+}
+
+// absent means zero, which the storage layer reads as its default. a present
+// but unparseable value is an error rather than a silent fallback.
+func intParam(w http.ResponseWriter, q url.Values, name string) (int, bool) {
+	raw := q.Get(name)
+	if raw == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{
+			Code:    VALIDATION,
+			Message: name + " must be an integer",
+		})
+		return 0, false
+	}
+	return n, true
+}
