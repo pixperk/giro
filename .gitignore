@@ -22,3 +22,6 @@ coverage.html
 # go workspace files, local to a machine
 go.work
 go.work.sum
+
+#internal docs
+docs/
