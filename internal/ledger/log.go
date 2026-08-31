@@ -36,6 +36,27 @@ type Log struct {
 	IdempotencyHash string `json:"idempotencyHash,omitempty"`
 }
 
+// what a metadata log entry records. the target is a transaction id or an
+// account address, as a string either way, so one payload shape covers both.
+type MetadataTargetType string
+
+const (
+	TargetTransaction MetadataTargetType = "TRANSACTION"
+	TargetAccount     MetadataTargetType = "ACCOUNT"
+)
+
+type SetMetadataPayload struct {
+	TargetType MetadataTargetType `json:"targetType"`
+	TargetID   string             `json:"targetId"`
+	Metadata   Metadata           `json:"metadata"`
+}
+
+type DeleteMetadataPayload struct {
+	TargetType MetadataTargetType `json:"targetType"`
+	TargetID   string             `json:"targetId"`
+	Key        string             `json:"key"`
+}
+
 // ChainHash covers the previous entry's hash as well as this entry's bytes, so
 // editing any historical entry invalidates every hash after it. hashing each
 // entry alone would let someone rewrite one and recompute just its own digest.

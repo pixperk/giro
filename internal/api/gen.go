@@ -74,6 +74,13 @@ type Account struct {
 	InsertionDate time.Time `json:"insertionDate"`
 
 	// Metadata Opaque to the ledger. Never interpreted, only stored.
+	//
+	// At most 32 keys, keys up to 128 bytes and values up to 1024 bytes. It is
+	// for identifiers and short labels; anything larger belongs in whatever
+	// system owns the document.
+	//
+	//
+	// Example: {"orderId":"ord_8812","provider":"stripe"}
 	Metadata  *Metadata `json:"metadata,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 
@@ -94,6 +101,13 @@ type Balances map[string]Amount
 // CreateTransactionRequest defines model for CreateTransactionRequest.
 type CreateTransactionRequest struct {
 	// Metadata Opaque to the ledger. Never interpreted, only stored.
+	//
+	// At most 32 keys, keys up to 128 bytes and values up to 1024 bytes. It is
+	// for identifiers and short labels; anything larger belongs in whatever
+	// system owns the document.
+	//
+	//
+	// Example: {"orderId":"ord_8812","provider":"stripe"}
 	Metadata *Metadata `json:"metadata,omitempty"`
 	Postings []Posting `json:"postings"`
 
@@ -152,6 +166,12 @@ type LogPage struct {
 }
 
 // Metadata Opaque to the ledger. Never interpreted, only stored.
+//
+// At most 32 keys, keys up to 128 bytes and values up to 1024 bytes. It is
+// for identifiers and short labels; anything larger belongs in whatever
+// system owns the document.
+//
+// Example: {"orderId":"ord_8812","provider":"stripe"}
 type Metadata map[string]string
 
 // Posting defines model for Posting.
@@ -183,6 +203,13 @@ type Transaction struct {
 	InsertedAt time.Time `json:"insertedAt"`
 
 	// Metadata Opaque to the ledger. Never interpreted, only stored.
+	//
+	// At most 32 keys, keys up to 128 bytes and values up to 1024 bytes. It is
+	// for identifiers and short labels; anything larger belongs in whatever
+	// system owns the document.
+	//
+	//
+	// Example: {"orderId":"ord_8812","provider":"stripe"}
 	Metadata *Metadata `json:"metadata,omitempty"`
 
 	// PostCommitVolumes Volumes of every touched account immediately after this transaction. Frozen at commit and never rewritten.
@@ -231,6 +258,12 @@ type LedgerPath = string
 
 // Limit defines model for Limit.
 type Limit = int
+
+// MetadataKey defines model for MetadataKey.
+type MetadataKey = string
+
+// TransactionID defines model for TransactionID.
+type TransactionID = int64
 
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
@@ -291,5 +324,11 @@ type CreateTransactionParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// SetAccountMetadataJSONRequestBody defines body for SetAccountMetadata for application/json ContentType.
+type SetAccountMetadataJSONRequestBody = Metadata
+
 // CreateTransactionJSONRequestBody defines body for CreateTransaction for application/json ContentType.
 type CreateTransactionJSONRequestBody = CreateTransactionRequest
+
+// SetTransactionMetadataJSONRequestBody defines body for SetTransactionMetadata for application/json ContentType.
+type SetTransactionMetadataJSONRequestBody = Metadata

@@ -436,3 +436,128 @@ func TestUnknownLedger(t *testing.T) {
 		t.Errorf("code = %s", code)
 	}
 }
+
+func TestTransactionMetadataEndpoints(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 100)
+
+	set := do(t, s, http.MethodPost, base+"/transactions/1/metadata",
+		map[string]string{"orderId": "ord_1"})
+	if set.Code != http.StatusOK {
+		t.Fatalf("%d %s", set.Code, set.Body.String())
+	}
+	if got := decode[Transaction](t, set); (*got.Metadata)["orderId"] != "ord_1" {
+		t.Errorf("metadata = %v", got.Metadata)
+	}
+
+	// merges rather than replaces
+	merged := decode[Transaction](t, do(t, s, http.MethodPost, base+"/transactions/1/metadata",
+		map[string]string{"provider": "stripe"}))
+	if m := *merged.Metadata; m["orderId"] != "ord_1" || m["provider"] != "stripe" {
+		t.Errorf("metadata = %v, want both keys", m)
+	}
+
+	deleted := decode[Transaction](t, do(t, s, http.MethodDelete, base+"/transactions/1/metadata/orderId", nil))
+	if _, ok := (*deleted.Metadata)["orderId"]; ok {
+		t.Errorf("key survived deletion: %v", deleted.Metadata)
+	}
+
+	missing := do(t, s, http.MethodPost, base+"/transactions/99/metadata", map[string]string{"a": "1"})
+	if missing.Code != http.StatusNotFound {
+		t.Errorf("missing transaction = %d, want 404", missing.Code)
+	}
+}
+
+func TestAccountMetadataEndpoints(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	// tagging an account before any money has moved through it
+	created := do(t, s, http.MethodPost, base+"/accounts/users:future/metadata",
+		map[string]string{"userId": "u_1"})
+	if created.Code != http.StatusOK {
+		t.Fatalf("%d %s", created.Code, created.Body.String())
+	}
+	a := decode[Account](t, created)
+	if a.Address != "users:future" || (*a.Metadata)["userId"] != "u_1" {
+		t.Errorf("got %+v", a)
+	}
+
+	// and it still holds nothing
+	if len(decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/users:future/balances", nil))) != 0 {
+		t.Error("tagging an account must not fund it")
+	}
+
+	// metadata survives a later posting, which upserts the same row
+	fund(t, s, base, "users:future", 500)
+	after := decode[Account](t, do(t, s, http.MethodGet, base+"/accounts/users:future", nil))
+	if (*after.Metadata)["userId"] != "u_1" {
+		t.Errorf("metadata lost when the account was upserted by a commit: %v", after.Metadata)
+	}
+
+	deleted := decode[Account](t, do(t, s, http.MethodDelete, base+"/accounts/users:future/metadata/userId", nil))
+	if deleted.Metadata != nil {
+		if _, ok := (*deleted.Metadata)["userId"]; ok {
+			t.Errorf("key survived deletion: %v", deleted.Metadata)
+		}
+	}
+}
+
+func TestMetadataValidationOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 100)
+
+	long := strings.Repeat("x", 1025)
+	tests := []struct {
+		why  string
+		body any
+	}{
+		{"nothing to set", map[string]string{}},
+		{"an empty key", map[string]string{"": "v"}},
+		{"an oversized value", map[string]string{"k": long}},
+		{"a value that is not a string", `{"k":123}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.why, func(t *testing.T) {
+			rec := do(t, s, http.MethodPost, base+"/transactions/1/metadata", tc.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if got := decode[Error](t, rec).Code; got != VALIDATION {
+				t.Errorf("code = %s, want VALIDATION", got)
+			}
+		})
+	}
+
+	bad := do(t, s, http.MethodPost, base+"/accounts/not%20an%20address/metadata", map[string]string{"a": "1"})
+	if bad.Code != http.StatusBadRequest {
+		t.Errorf("invalid address = %d, want 400", bad.Code)
+	}
+}
+
+// metadata changes are mutations, so they belong in the chain.
+func TestMetadataAppearsInTheLog(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 100)
+
+	do(t, s, http.MethodPost, base+"/transactions/1/metadata", map[string]string{"a": "1"})
+	do(t, s, http.MethodDelete, base+"/transactions/1/metadata/a", nil)
+
+	page := decode[LogPage](t, do(t, s, http.MethodGet, base+"/logs", nil))
+	want := []LogType{NEWTRANSACTION, SETMETADATA, DELETEMETADATA}
+	if len(page.Items) != len(want) {
+		t.Fatalf("%d entries, want %d", len(page.Items), len(want))
+	}
+	for i, w := range want {
+		if page.Items[i].Type != w {
+			t.Errorf("entry %d is %s, want %s", i+1, page.Items[i].Type, w)
+		}
+	}
+	if !strings.Contains(string(page.Items[1].Data), `"targetType":"TRANSACTION"`) {
+		t.Errorf("log payload does not identify its target: %s", page.Items[1].Data)
+	}
+}

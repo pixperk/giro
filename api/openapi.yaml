@@ -122,10 +122,7 @@ paths:
   /v1/ledgers/{ledger}/transactions/{id}:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"
-      - name: id
-        in: path
-        required: true
-        schema: { type: integer, format: int64 }
+      - $ref: "#/components/parameters/TransactionID"
     get:
       tags: [transactions]
       summary: Read a transaction
@@ -136,6 +133,101 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Transaction" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/transactions/{id}/metadata:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/TransactionID"
+    post:
+      tags: [transactions]
+      summary: Merge metadata into a transaction
+      description: |
+        Merges the given keys into whatever is already there. Existing keys not
+        mentioned are left alone, so two callers writing different keys do not
+        overwrite each other.
+
+        Writing metadata that is already present changes nothing and appends no
+        log entry.
+      operationId: setTransactionMetadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Metadata" }
+      responses:
+        "200":
+          description: The transaction, with its metadata as it now stands.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/TransactionID"
+      - $ref: "#/components/parameters/MetadataKey"
+    delete:
+      tags: [transactions]
+      summary: Remove one metadata key from a transaction
+      description: Removing a key that is not there changes nothing and is not an error.
+      operationId: deleteTransactionMetadata
+      responses:
+        "200":
+          description: The transaction, with its metadata as it now stands.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/accounts/{address}/metadata:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/Address"
+    post:
+      tags: [accounts]
+      summary: Merge metadata into an account
+      description: |
+        Creates the account if it does not exist. Accounts are never registered,
+        so tagging one before any money has moved through it is normal.
+
+        Merges rather than replaces, and writing metadata that is already
+        present appends no log entry.
+      operationId: setAccountMetadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Metadata" }
+      responses:
+        "200":
+          description: The account, with its metadata as it now stands.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/Address"
+      - $ref: "#/components/parameters/MetadataKey"
+    delete:
+      tags: [accounts]
+      summary: Remove one metadata key from an account
+      operationId: deleteAccountMetadata
+      responses:
+        "200":
+          description: The account, with its metadata as it now stands.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/Error" }
 
@@ -245,6 +337,17 @@ components:
       required: true
       description: Ledger name. Each ledger is a separate set of books with its own ids and its own log chain.
       schema: { type: string }
+    TransactionID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    MetadataKey:
+      name: key
+      in: path
+      required: true
+      description: A single metadata key.
+      schema: { type: string, maxLength: 128 }
     Address:
       name: address
       in: path
@@ -340,8 +443,15 @@ components:
 
     Metadata:
       type: object
-      description: Opaque to the ledger. Never interpreted, only stored.
-      additionalProperties: { type: string }
+      description: |
+        Opaque to the ledger. Never interpreted, only stored.
+
+        At most 32 keys, keys up to 128 bytes and values up to 1024 bytes. It is
+        for identifiers and short labels; anything larger belongs in whatever
+        system owns the document.
+      maxProperties: 32
+      additionalProperties: { type: string, maxLength: 1024 }
+      example: { "orderId": "ord_8812", "provider": "stripe" }
 
     CreateTransactionRequest:
       type: object

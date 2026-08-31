@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/pixperk/giro/internal/ledger"
 	"github.com/pixperk/giro/internal/storage"
 )
 
@@ -47,7 +48,13 @@ func classify(err error) (status int, code ErrorCode, message string) {
 	case errors.Is(err, storage.ErrDuplicateReference), errors.Is(err, storage.ErrLedgerExists):
 		return http.StatusConflict, CONFLICT, err.Error()
 
-	case errors.Is(err, storage.ErrNoPostings), errors.Is(err, storage.ErrInvalidCursor):
+	case errors.Is(err, storage.ErrNoPostings), errors.Is(err, storage.ErrInvalidCursor),
+		errors.Is(err, storage.ErrEmptyMetadata),
+		errors.Is(err, ledger.ErrEmptyMetadataKey),
+		errors.Is(err, ledger.ErrTooManyMetadataKeys),
+		errors.Is(err, ledger.ErrMetadataKeyTooLong),
+		errors.Is(err, ledger.ErrMetadataValueTooLong),
+		errors.Is(err, ledger.ErrInvalidSourceAddress):
 		return http.StatusBadRequest, VALIDATION, err.Error()
 
 	default:

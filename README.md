@@ -451,6 +451,48 @@ An unrecognised expand value is a 400 rather than being ignored, so a typo does
 not look like an account that happens to have no volumes.
 
 
+### D21. Metadata history lives in the log, not in a revision table
+
+Metadata is stored on the `transactions` and `accounts` rows as a jsonb column,
+and every change appends a `SET_METADATA` or `DELETE_METADATA` entry to the log.
+
+The obvious alternative is a table keyed by `(target, revision)` holding every
+version of the document. That answers "what was the metadata at revision 3",
+which nothing has asked for, and it would be a second append only history of
+the same events with weaker guarantees than the one that is hash chained.
+
+The split instead is: the column says what it is now, the log says how it got
+that way, and a historical value is a replay of the log up to a date. If an
+indexed historical lookup is ever needed, it can be built from the log, which
+is what having a source of truth is for.
+
+Postgres does the merge and the delete natively, `metadata || $new` and
+`metadata - $key`, so there is no read modify write and two callers touching
+different keys do not overwrite each other.
+
+### D22. A metadata write that changes nothing writes nothing
+
+Setting metadata that is already present is a no-op: no row is touched and no
+log entry is appended.
+
+Clients retry, so an identical write is normal traffic rather than a mistake.
+Recording it would fill the hash chain with entries describing nothing
+happening.
+
+The cost is that the trail records changes rather than attempts, so "someone
+tried to set this at 14:03" is not answerable when the value was already set.
+For a ledger, what changed is the more useful record.
+
+### D23. Tagging an account creates it
+
+Accounts are never registered, so setting metadata on an address that has never
+been used creates the row rather than returning a 404.
+
+That is the moment a caller most wants it: attaching a user id to a wallet
+before any money has moved through it. The account still holds nothing, since
+tagging is not funding.
+
+
 ## Layout
 
 ```

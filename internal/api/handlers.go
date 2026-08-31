@@ -87,9 +87,8 @@ func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, Error{Code: VALIDATION, Message: "id must be an integer"})
+	id, ok := transactionID(w, r)
+	if !ok {
 		return
 	}
 
@@ -218,4 +217,74 @@ func intParam(w http.ResponseWriter, q url.Values, name string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// --- metadata ---------------------------------------------------------------
+
+func (s *Server) setTransactionMetadata(w http.ResponseWriter, r *http.Request) {
+	id, ok := transactionID(w, r)
+	if !ok {
+		return
+	}
+	var m Metadata
+	if !decodeJSON(w, r, &m) {
+		return
+	}
+
+	tx, err := s.store(r.PathValue("ledger")).
+		SetTransactionMetadata(r.Context(), id, map[string]string(m))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPITransaction(tx))
+}
+
+func (s *Server) deleteTransactionMetadata(w http.ResponseWriter, r *http.Request) {
+	id, ok := transactionID(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := s.store(r.PathValue("ledger")).
+		DeleteTransactionMetadataKey(r.Context(), id, r.PathValue("key"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPITransaction(tx))
+}
+
+func (s *Server) setAccountMetadata(w http.ResponseWriter, r *http.Request) {
+	var m Metadata
+	if !decodeJSON(w, r, &m) {
+		return
+	}
+
+	a, err := s.store(r.PathValue("ledger")).
+		SetAccountMetadata(r.Context(), r.PathValue("address"), map[string]string(m))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIAccount(a))
+}
+
+func (s *Server) deleteAccountMetadata(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store(r.PathValue("ledger")).
+		DeleteAccountMetadataKey(r.Context(), r.PathValue("address"), r.PathValue("key"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIAccount(a))
+}
+
+func transactionID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, Error{Code: VALIDATION, Message: "id must be an integer"})
+		return 0, false
+	}
+	return id, true
 }
