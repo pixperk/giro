@@ -22,12 +22,18 @@ const stub = `-- %s
 // New writes an empty migration into dir, named for the current utc time, and
 // returns its path.
 func New(dir, name string) (string, error) {
+	return newAt(dir, name, time.Now())
+}
+
+// the clock is a parameter so the collision guard below can be tested without
+// racing a real second.
+func newAt(dir, name string, now time.Time) (string, error) {
 	slug := Slugify(name)
 	if slug == "" {
 		return "", fmt.Errorf("migration name %q has no usable characters", name)
 	}
 
-	filename := fmt.Sprintf("%s_%s.sql", time.Now().UTC().Format(TimestampLayout), slug)
+	filename := fmt.Sprintf("%s_%s.sql", now.UTC().Format(TimestampLayout), slug)
 	path := filepath.Join(dir, filename)
 
 	if _, err := os.Stat(path); err == nil {

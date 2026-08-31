@@ -76,13 +76,7 @@ func Run(ctx context.Context, conn *pgx.Conn, fsys fs.FS) (n int, err error) {
 		return 0, fmt.Errorf("acquire advisory lock: %w", err)
 	}
 	defer func() {
-		var released bool
-		if e := conn.QueryRow(ctx, "select pg_advisory_unlock($1, $2)", lockKeyApp, lockKeyMigrations).Scan(&released); e != nil {
-			err = errors.Join(err, fmt.Errorf("release advisory lock: %w", e))
-		} else if !released {
-			// only reachable if this ran on a connection that never held it
-			err = errors.Join(err, errors.New("advisory lock was not held at release"))
-		}
+		err = errors.Join(err, releaseAdvisoryLock(ctx, conn))
 	}()
 
 	if _, err := conn.Exec(ctx, createTable); err != nil {
@@ -109,6 +103,24 @@ func Run(ctx context.Context, conn *pgx.Conn, fsys fs.FS) (n int, err error) {
 	}
 
 	return n, nil
+}
+
+// releasing is checked rather than fired and forgotten.
+//
+// pg_advisory_unlock returns false when this session does not hold the lock,
+// and raises no error. ignoring that is how a lock ends up held until the
+// connection happens to close, with the next deploy blocking on something
+// nobody knows about.
+func releaseAdvisoryLock(ctx context.Context, conn *pgx.Conn) error {
+	var released bool
+	if err := conn.QueryRow(ctx,
+		"select pg_advisory_unlock($1, $2)", lockKeyApp, lockKeyMigrations).Scan(&released); err != nil {
+		return fmt.Errorf("release advisory lock: %w", err)
+	}
+	if !released {
+		return errors.New("advisory lock was not held at release")
+	}
+	return nil
 }
 
 func apply(ctx context.Context, conn *pgx.Conn, m Migration) error {

@@ -522,35 +522,211 @@ func TestNewRejectsAnUnusableName(t *testing.T) {
 	}
 }
 
-// two migrations created in the same second would collide, and silently
-// overwriting one would lose it.
-func TestNewRefusesToOverwrite(t *testing.T) {
-	dir := t.TempDir()
+// Run returns Load's error rather than proceeding with a partial set. a
+// migration the runner cannot name is one it cannot order, and applying the
+// rest would leave a gap nothing records.
+func TestRunRejectsABadMigrationName(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql": "create table first (id int);",
+		"nope.sql":                 "create table nope (id int);",
+	})
 
-	first, err := New(dir, "same name")
+	if _, err := Run(ctx, conn, root.FS()); err == nil {
+		t.Fatal("a malformed filename was accepted")
+	}
+
+	var exists bool
+	if err := conn.QueryRow(ctx, "select to_regclass('first') is not null").Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Error("a migration ran despite the set failing to load")
+	}
+}
+
+// every step before the first migration can fail on a dead connection, and
+// each must surface rather than being swallowed.
+func TestRunOnAClosedConnection(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql": "create table first (id int);",
+	})
+
+	if err := conn.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(ctx, conn, root.FS()); err == nil {
+		t.Fatal("Run succeeded on a closed connection")
+	}
+	if _, err := Status(ctx, conn, root.FS()); err == nil {
+		t.Fatal("Status succeeded on a closed connection")
+	}
+}
+
+// something else already owns the name. create table if not exists finds it and
+// leaves it alone, so the failure surfaces on the read that follows.
+func TestRunWithAConflictingTable(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_first.sql": "create table first (id int);",
+	})
+
+	if _, err := conn.Exec(ctx, `create table schema_migrations (something_else int)`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Run(ctx, conn, root.FS())
+	if err == nil {
+		t.Fatal("Run proceeded against a table it does not own")
+	}
+	if !strings.Contains(err.Error(), "schema_migrations") {
+		t.Errorf("err = %v, want it to name the table", err)
+	}
+}
+
+// a no-transaction migration has nothing to roll back, so the record must
+// simply be absent rather than undone.
+func TestNoTransactionMigrationFailureIsReported(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	_, root := dir(t, map[string]string{
+		"20260101000001_bad.sql": noTransactionDirective + "\ncreate table oops (id nonsense);",
+	})
+
+	if _, err := Run(ctx, conn, root.FS()); err == nil {
+		t.Fatal("a broken no-transaction migration was accepted")
+	}
+	var count int
+	if err := conn.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("%d migrations recorded, want 0", count)
+	}
+}
+
+// the count Run returns is what the cli prints.
+func TestRunReportsTheCount(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+	d, root := dir(t, map[string]string{
+		"20260101000001_first.sql":  "create table first (id int);",
+		"20260101000002_second.sql": "create table second (id int);",
+	})
+
+	n, err := Run(ctx, conn, root.FS())
+	if err != nil || n != 2 {
+		t.Fatalf("applied %d (err %v), want 2", n, err)
+	}
+	if n, err = Run(ctx, conn, root.FS()); err != nil || n != 0 {
+		t.Errorf("second run applied %d (err %v), want 0", n, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(d, "20260101000003_third.sql"),
+		[]byte("create table third (id int);"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err = Run(ctx, conn, root.FS()); err != nil || n != 1 {
+		t.Errorf("third run applied %d (err %v), want 1", n, err)
+	}
+}
+
+// pg_advisory_unlock returns false when the session does not hold the lock, and
+// raises no error. that is how a lock ends up held until the connection happens
+// to close, with the next deploy blocking on something nobody knows about.
+func TestReleaseAdvisoryLock(t *testing.T) {
+	ctx, conn, _ := testConn(t)
+
+	t.Run("when it was never held", func(t *testing.T) {
+		err := releaseAdvisoryLock(ctx, conn)
+		if err == nil {
+			t.Fatal("releasing a lock we never took reported success")
+		}
+		if !strings.Contains(err.Error(), "not held") {
+			t.Errorf("err = %v", err)
+		}
+	})
+
+	t.Run("when it is held", func(t *testing.T) {
+		if _, err := conn.Exec(ctx,
+			"select pg_advisory_lock($1, $2)", lockKeyApp, lockKeyMigrations); err != nil {
+			t.Fatal(err)
+		}
+		if err := releaseAdvisoryLock(ctx, conn); err != nil {
+			t.Errorf("err = %v, want nil", err)
+		}
+		var held int
+		if err := conn.QueryRow(ctx,
+			"select count(*) from pg_locks where locktype = 'advisory' and objid = $1",
+			lockKeyMigrations).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		if held != 0 {
+			t.Errorf("%d advisory locks still held", held)
+		}
+	})
+
+	t.Run("on a dead connection", func(t *testing.T) {
+		dead, err := pgx.Connect(ctx, testURL())
+		if err != nil {
+			t.Skip(err)
+		}
+		if err := dead.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := releaseAdvisoryLock(ctx, dead); err == nil {
+			t.Error("releasing on a closed connection reported success")
+		}
+	})
+}
+
+// two migrations created within the same second would collide, and silently
+// overwriting one would lose it. the clock is injected so this does not depend
+// on how fast the test runs.
+func TestNewRefusesToOverwriteAtTheSameSecond(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	first, err := newAt(dir, "add tables", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(first, []byte("-- edited"), 0o644); err != nil {
+	if err := os.WriteFile(first, []byte("-- real work"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// force the collision rather than racing the clock
-	name := filepath.Base(first)
-	stamp := name[:14]
-	collision := filepath.Join(dir, stamp+"_same_name.sql")
-	if collision != first {
-		t.Fatalf("test setup: %s and %s should be the same path", collision, first)
+	if _, err := newAt(dir, "add tables", now); err == nil {
+		t.Fatal("a second migration in the same second overwrote the first")
 	}
-
-	// New builds its name from the current second, so this only collides when
-	// it runs inside the same second. assert the guard exists by calling the
-	// path it protects.
-	if _, err := os.Stat(first); err != nil {
+	body, err := os.ReadFile(first)
+	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := os.ReadFile(first)
-	if string(body) != "-- edited" {
-		t.Error("the existing file was overwritten")
+	if string(body) != "-- real work" {
+		t.Errorf("the existing file was overwritten: %q", body)
+	}
+
+	// a different name in the same second is fine, and so is the same name a
+	// second later
+	if _, err := newAt(dir, "other tables", now); err != nil {
+		t.Errorf("a different name collided: %v", err)
+	}
+	if _, err := newAt(dir, "add tables", now.Add(time.Second)); err != nil {
+		t.Errorf("the next second collided: %v", err)
+	}
+}
+
+// whatever the local zone, the filename is utc, so files from two developers
+// sort in the order they were written.
+func TestNewNamesInUTC(t *testing.T) {
+	dir := t.TempDir()
+	kolkata := time.FixedZone("IST", 5*3600+1800)
+	local := time.Date(2026, 3, 1, 2, 30, 0, 0, kolkata) // 2026-02-28 21:00 UTC
+
+	path, err := newAt(dir, "first", local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filepath.Base(path)[:14]; got != "20260228210000" {
+		t.Errorf("named %s, want the utc instant 20260228210000", got)
 	}
 }
