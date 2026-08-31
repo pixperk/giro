@@ -44,7 +44,5 @@ func New(pool *pgxpool.Pool, ledgerName string) *Store {
 	return &Store{pool: pool, ledger: ledgerName}
 }
 
-func (s *Store) Ledger() string { return s.ledger }
-
 // Retries reports how many commits have been restarted due to contention.
 func (s *Store) Retries() int64 { return s.retries.Load() }
