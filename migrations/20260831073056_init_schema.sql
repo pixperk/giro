@@ -190,7 +190,18 @@ create table logs (
     ledger           varchar     not null,
     id               bigint      not null,
     type             text        not null,
-    data             jsonb       not null,
+
+    -- json, not jsonb, and this one matters.
+    --
+    -- jsonb parses into a binary tree: it reorders keys, strips whitespace and
+    -- silently keeps only the last of any duplicate key. so the bytes that come
+    -- back are not the bytes that went in, and a hash taken at write time will
+    -- never match a hash recomputed at verification time. the integrity check
+    -- would fail on a healthy ledger, which is worse than having none.
+    --
+    -- json is validated on write and stored verbatim. we never query inside a
+    -- log entry, so the indexing jsonb would buy is not wanted here.
+    data             json        not null,
     date             timestamptz not null default now(),
 
     -- sha256 over the previous hash and this entry. editing any historical

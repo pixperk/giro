@@ -321,6 +321,26 @@ would turn a broken payment into a no-op that commits and returns success.
 Validation rejects nil, so the panic is unreachable through any correct path. It
 exists to make a skipped validation loud rather than silent.
 
+
+
+`jsonb` parses into a binary tree. It reorders keys, strips whitespace, and
+silently keeps only the last of any duplicate key. The bytes that come back are
+not the bytes that went in.
+
+That is fatal for a hash chain. A hash taken at write time would never match one
+recomputed during verification, so the integrity check would fail on a perfectly
+healthy ledger, which is worse than not having one: a real problem becomes
+indistinguishable from the false alarm.
+
+`json` is validated on write and stored verbatim, and round trips byte for byte.
+The indexing `jsonb` would buy is irrelevant here, because a log entry is
+appended, read whole for replay, and looked up by `idempotency_key`, which is
+its own column. Nothing ever queries inside one.
+
+This applies only to `logs.data`. `transactions.postings` and the metadata
+columns stay `jsonb`, since nothing hashes them and querying into them is
+useful.
+
 ### D13. Multi ledger from the start, in one schema
 
 Every table carries `ledger` first in its key. Retrofitting tenancy means
@@ -330,6 +350,26 @@ pagination wants anyway.
 
 Since the hash chain serialises writes per ledger, separate ledgers are also how
 write throughput scales.
+
+### D14. The log entry is stored as `json`, not `jsonb`
+
+`jsonb` parses into a binary tree. It reorders keys, strips whitespace, and
+silently keeps only the last of any duplicate key. The bytes that come back are
+not the bytes that went in.
+
+That is fatal for a hash chain. A hash taken at write time would never match one
+recomputed during verification, so the integrity check would fail on a perfectly
+healthy ledger, which is worse than not having one: a real problem becomes
+indistinguishable from the false alarm.
+
+`json` is validated on write and stored verbatim, and round trips byte for byte.
+The indexing `jsonb` would buy is irrelevant here, because a log entry is
+appended, read whole for replay, and looked up by `idempotency_key`, which is
+its own column. Nothing ever queries inside one.
+
+This applies only to `logs.data`. `transactions.postings` and the metadata
+columns stay `jsonb`, since nothing hashes them and querying into them is
+useful.
 
 ---
 
