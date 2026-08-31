@@ -46,7 +46,7 @@ func TestEveryRouteIsDocumented(t *testing.T) {
 	}
 
 	// served by the binary rather than described by the contract
-	for _, undocumented := range []string{"GET /openapi.yaml", "GET /docs", "GET /healthz"} {
+	for _, undocumented := range []string{"GET /openapi.yaml", "GET /docs", "GET /healthz", "GET /"} {
 		documented[undocumented] = true
 	}
 
@@ -117,6 +117,7 @@ func registeredRoutes() []string {
 		"GET /openapi.yaml",
 		"GET /docs",
 		"GET /healthz",
+		"GET /",
 	}
 }
 

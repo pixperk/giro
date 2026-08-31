@@ -1,10 +1,17 @@
 package api
 
 import (
+	_ "embed"
 	"net/http"
 
 	"github.com/pixperk/giro"
 )
+
+// a page that explains the model and drives this server's own api, for showing
+// the thing to someone rather than reading its reference.
+//
+//go:embed demo.html
+var demoHTML []byte
 
 // a single page that renders the spec and can call the api. loaded from a cdn
 // rather than vendored, because the bundle is megabytes and this page is for
@@ -37,6 +44,16 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(giro.OpenAPISpec)
+}
+
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	// ServeMux matches "/" as a catch all, so anything unrouted lands here
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(demoHTML)
 }
 
 func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {

@@ -51,6 +51,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleSpec)
 	s.mux.HandleFunc("GET /docs", s.handleDocs)
+	s.mux.HandleFunc("GET /", s.handleHome)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 }
 
