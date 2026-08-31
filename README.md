@@ -251,6 +251,13 @@ chain is the same lock that allocates the id, so gaplessness is free.
 **Revisit if** hashing moves to a background process, at which point the
 serialisation is no longer paid for and a sequence becomes the better trade.
 
+**Care needed when doing so.** Measured after step 3: this row lock serialises
+far more than intended, since it is held to commit and everything after id
+allocation therefore runs one transaction at a time per ledger. Removing the
+row lock without also verifying the concurrency tests still fail when
+`SELECT ... FOR UPDATE` is removed would drop a defence nothing is currently
+watching.
+
 ### D7. No foreign key referencing `ledgers`
 
 A foreign key check takes `FOR KEY SHARE` on the parent row. The commit path

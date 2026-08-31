@@ -6,6 +6,12 @@ import (
 	"math/big"
 )
 
+// world is the boundary of the ledger, standing for everything not tracked
+// here. it is the only account allowed a negative balance, because otherwise
+// the first deposit would have nowhere to come from and the ledger could never
+// be started.
+const WorldAccount = "world"
+
 var (
 	ErrInvalidSourceAddress      = errors.New("invalid source address")
 	ErrInvalidDestinationAddress = errors.New("invalid destination address")
