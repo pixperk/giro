@@ -9,18 +9,22 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 :root {
-  --paper:    #FBFBF9;
-  --card:     #FFFFFF;
-  --ink:      #14181A;
-  --ink-soft: #4A5457;
-  --muted:    #7E888B;
-  --rule:     #E2E5E1;
-  --rule-firm:#C9CEC8;
-  --green:    #1C5B45;
-  --green-bg: #EEF4F0;
-  --red:      #9C3B26;
-  --red-bg:   #FBF0EC;
-  --amber-bg: #FAF4E8;
+  color-scheme: dark;
+
+  /* ink rather than a neutral grey: the whole palette carries a slight green
+     bias, so the accent belongs to it instead of sitting on top of it. */
+  --paper:    #0E1211;
+  --card:     #141917;
+  --ink:      #E7EDE9;
+  --ink-soft: #A6B1AB;
+  --muted:    #737E78;
+  --rule:     #212926;
+  --rule-firm:#313A36;
+  --green:    #74C29B;
+  --green-bg: #16241E;
+  --red:      #E08D71;
+  --red-bg:   #2A1A15;
+  --amber-bg: #241E12;
 
   --serif: "Instrument Serif", Georgia, serif;
   --sans:  "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -46,6 +50,7 @@ h1 {
   line-height: 0.9; letter-spacing: -0.02em; margin: 0 0 1.25rem;
 }
 h1 em { font-style: italic; color: var(--green); }
+h1 { color: #F2F6F3; }
 .tagline { font-size: 1.1rem; color: var(--ink-soft); max-width: 34ch; margin: 0; }
 .definition {
   font-family: var(--serif); font-style: italic; font-size: 1rem; color: var(--muted);
@@ -55,7 +60,7 @@ h1 em { font-style: italic; color: var(--green); }
 .links a { color: var(--ink-soft); }
 
 /* ---------- sections ---------- */
-section { padding: 3.5rem 0; border-bottom: 1px solid var(--rule); }
+section { padding: 3.5rem 0; scroll-margin-top: 1rem; border-bottom: 1px solid var(--rule); }
 section:last-of-type { border-bottom: none; }
 .eyebrow {
   font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
@@ -71,9 +76,42 @@ p { margin: 0 0 1rem; max-width: 64ch; }
 /* ---------- ideas ---------- */
 .ideas { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1px;
          background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.idea h3 { color: #F2F6F3; }
 .idea { background: var(--card); padding: 1.4rem 1.3rem; }
 .idea h3 { font-family: var(--serif); font-weight: 400; font-size: 1.2rem; margin: 0 0 0.4rem; }
 .idea p { font-size: 0.9rem; color: var(--ink-soft); margin: 0; max-width: none; }
+
+/* ---------- explainers ---------- */
+.split { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.split > div { min-width: 0; }
+code {
+  font-family: var(--mono); font-size: 0.86em; background: var(--card);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 0.08em 0.32em;
+}
+.snippet {
+  font-family: var(--mono); font-size: 0.78rem; line-height: 1.65; margin: 0;
+  background: var(--card); border: 1px solid var(--rule); border-left: 2px solid var(--green);
+  border-radius: 4px; padding: 0.9rem 1rem; overflow-x: auto;
+}
+.snippet .k { color: var(--green); }
+.snippet .s { color: var(--ink-soft); }
+.effect { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-top: 0.3rem; }
+.effect caption { text-align: left; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+                  text-transform: uppercase; color: var(--muted); padding-bottom: 0.6rem; }
+.note { font-size: 0.88rem; color: var(--muted); border-left: 2px solid var(--rule-firm);
+        padding-left: 0.9rem; margin: 1.4rem 0 0; max-width: 60ch; }
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.6rem 2.5rem; }
+.scope h3 { font-family: var(--sans); font-size: 0.82rem; font-weight: 600; margin: 0 0 0.3rem;
+            letter-spacing: 0.01em; }
+.scope p { font-size: 0.88rem; color: var(--muted); margin: 0; max-width: none; }
+.timeline { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; margin-top: 0.4rem; }
+.timeline div { display: grid; grid-template-columns: 7rem 1fr auto; gap: 1rem; padding: 0.55rem 0.9rem;
+                border-bottom: 1px solid var(--rule); background: var(--card); font-size: 0.84rem;
+                align-items: baseline; }
+.timeline div:last-child { border-bottom: none; }
+.timeline .when { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.timeline .bal { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.timeline .late { color: var(--green); }
 
 /* ---------- console ---------- */
 .console { display: grid; grid-template-columns: 20rem 1fr; gap: 1px; background: var(--rule);
@@ -89,7 +127,7 @@ button {
   background: var(--card); color: var(--ink); border: 1px solid var(--rule-firm);
   border-radius: 4px; padding: 0.55rem 0.75rem; cursor: pointer; transition: background .12s, border-color .12s;
 }
-button:hover:not(:disabled) { background: var(--green-bg); border-color: var(--green); }
+button:hover:not(:disabled) { background: var(--green-bg); border-color: var(--green); color: #F2F6F3; }
 button:disabled { opacity: .45; cursor: default; }
 button .hint { display: block; font-weight: 400; font-size: 0.75rem; color: var(--muted); margin-top: 0.1rem; }
 button.ghost { border-style: dashed; }
@@ -101,6 +139,8 @@ button.danger:hover:not(:disabled) { background: var(--red-bg); border-color: va
   font-family: var(--mono); font-size: 0.82rem; padding: 0.42rem 0.55rem; width: 100%;
   border: 1px solid var(--rule-firm); border-radius: 4px; background: var(--paper); color: var(--ink);
 }
+.custom input::placeholder { color: var(--muted); }
+.custom input:focus { border-color: var(--green); outline: none; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
 
 /* ---------- ledger tables ---------- */
@@ -163,9 +203,15 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
          border-top: 1px solid var(--rule-firm); }
 
 @media (max-width: 60rem) {
+  .split { grid-template-columns: 1fr; gap: 1.75rem; }
   .console { grid-template-columns: 1fr; }
   .masthead { grid-template-columns: 1fr; gap: 1.5rem; }
   .definition { text-align: left; max-width: 40ch; }
+}
+@media (max-width: 34rem) {
+  .wrap { padding: 0 1.25rem; }
+  .timeline div { grid-template-columns: 5.5rem 1fr auto; gap: 0.6rem; }
+  .steps li { grid-template-columns: 1.4rem 1fr; }
 }
 </style>
 </head>
@@ -181,6 +227,7 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
       <p class="definition">from the Greek <i>gyros</i>, a circle: the circulation of money</p>
     </div>
     <nav class="links">
+      <a href="#live">Live demo</a>
       <a href="/docs">API reference</a>
       <a href="/openapi.yaml">OpenAPI spec</a>
       <a href="/healthz">Health</a>
@@ -188,7 +235,7 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
   </div>
 </header>
 
-<section>
+<section id="model">
   <div class="wrap">
     <p class="eyebrow">The model</p>
     <h2>Four ideas, and everything follows</h2>
@@ -214,7 +261,57 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
   </div>
 </section>
 
-<section>
+<section id="posting">
+  <div class="wrap">
+    <p class="eyebrow">The unit</p>
+    <h2>A posting, in full</h2>
+    <p class="lede">This is the whole vocabulary. Everything the ledger stores is built from records of this shape.</p>
+    <div class="split">
+      <div>
+<pre class="snippet">{
+  <span class="k">"source"</span>:      <span class="s">"users:alice"</span>,
+  <span class="k">"destination"</span>: <span class="s">"users:bob"</span>,
+  <span class="k">"asset"</span>:       <span class="s">"USD/2"</span>,
+  <span class="k">"amount"</span>:      3000
+}</pre>
+        <p class="note">Read aloud: <b>$30.00 moved from Alice to Bob.</b> Nothing is missing from that sentence, which is the point. The amount is always positive, because naming both sides already says which way it went.</p>
+        <p class="note"><code>USD/2</code> means two decimal places, so <code>3000</code> is thirty dollars. The scale lives inside the asset name rather than in a column beside it, so an amount cannot be read without knowing its unit. <code>USD</code> and <code>USD/2</code> are different assets and never mix.</p>
+      </div>
+      <div>
+        <table class="effect">
+          <caption>What that single posting does</caption>
+          <thead><tr><th>Account</th><th class="num">In</th><th class="num">Out</th><th class="num">Balance</th></tr></thead>
+          <tbody>
+            <tr><td class="acct">users:alice</td><td class="num">10000</td><td class="num">3000</td><td class="num">7000</td></tr>
+            <tr><td class="acct">users:bob</td><td class="num">3000</td><td class="num">0</td><td class="num">3000</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Two rows touched, one counter on each. The same <code>3000</code> added twice, so whatever leaves one place arrives somewhere else and the total across all accounts does not move. Do that a million times and it still does not move.</p>
+        <p class="note">Neither counter ever goes down, including on a reversal. Alice refunded would read <code>13000 in, 3000 out</code>: back to where she started, with the record that it happened and was undone. A single balance column would forget both.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="world">
+  <div class="wrap">
+    <p class="eyebrow">The boundary</p>
+    <h2>Why there is an account called world</h2>
+    <div class="split">
+      <div>
+        <p>Every posting needs two sides. So write down the first thing that ever happens: <b>Alice deposits $500.</b> What goes in <code>source</code>? Every account is empty. The ledger has just been created.</p>
+        <p>The money is coming from outside a system that is closed by construction. <code>world</code> is that outside: a bank, a card network, somebody's pocket. The ledger does not know which, only that value crossed its edge.</p>
+      </div>
+      <div>
+        <p><code>world</code> is the only account allowed a negative balance, and that is arithmetic rather than privilege. It starts at zero like everything else, so if it could not go negative the first deposit would fail and so would every one after it.</p>
+        <p>Its balance is a measurement. At <b>&minus;$500</b> it reads: five hundred dollars entered this ledger and have not left. For a wallet product that number is your total customer liability, and it is the one that should match your bank statement.</p>
+        <p class="note">Think of chips on a poker table. Buying in takes chips from the rack. The rack is not a player and has no stack, and counting it gives you exactly the number of chips in play, negated.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="live">
   <div class="wrap">
     <p class="eyebrow">Live</p>
     <h2>Drive the real thing</h2>
@@ -268,7 +365,7 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
   </div>
 </section>
 
-<section>
+<section id="commit">
   <div class="wrap">
     <p class="eyebrow">Inside a commit</p>
     <h2>What happens when you press one of those buttons</h2>
@@ -283,6 +380,45 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
       <li><span><b>Write the transaction and its per account moves</b><span class="why">Each move carries the account's balance at that instant, so history is a lookup rather than a replay.</span></span></li>
       <li><span><b>Append the log entry and commit</b><span class="why">Hashed onto the previous entry, in the same transaction as everything above. The log and the data it describes both land or neither does.</span></span></li>
     </ol>
+  </div>
+</section>
+
+<section id="clocks">
+  <div class="wrap">
+    <p class="eyebrow">Two clocks</p>
+    <h2>When it happened, and when we found out</h2>
+    <p class="lede">A settlement file arriving on Tuesday describes Friday. A card capture settles days after authorisation. Anything touching the outside world hears late, so every transaction carries both dates and they are allowed to disagree.</p>
+    <div class="split">
+      <div>
+        <div class="timeline">
+          <div><span class="when">1 March</span><span>Alice is funded</span><span class="bal">+100</span></div>
+          <div><span class="when">3 March</span><span>Alice is paid again</span><span class="bal">+50</span></div>
+          <div><span class="when">5 March</span><span>Alice pays out</span><span class="bal">&minus;30</span></div>
+          <div><span class="when late">2 March</span><span class="late">a settlement file arrives on the 8th, describing the 2nd</span><span class="bal late">+50</span></div>
+        </div>
+      </div>
+      <div>
+        <p>Ask what Alice held <b>on 3 March</b> and the answer is 200, not 150. The backdated payment belongs in second place, and everything after it shifts.</p>
+        <p>So each movement stores the running balance twice: once frozen in the order the ledger learned things, and once in the order they actually happened. The first answers <i>what did we believe at the time</i>, which is what an audit asks. The second answers <i>what was true on that date</i>, which is what a report asks.</p>
+        <p class="note">Only the second is ever rewritten. Keeping both is what separates a reconciliation discrepancy from a bug: it lets you say the system was correct and the information arrived late.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="scope">
+  <div class="wrap">
+    <p class="eyebrow">Scope</p>
+    <h2>What it deliberately does not decide</h2>
+    <p class="lede">The ledger records movements. It does not judge them. Everything below is somebody else's decision, and keeping them out is what lets this stay small enough to trust.</p>
+    <div class="scope">
+      <div><h3>Who may move money</h3><p>Authentication and authorisation are upstream. This service trusts its caller, which is why it belongs behind your API rather than in front of your users.</p></div>
+      <div><h3>Whether a payment is allowed</h3><p>Fraud rules, sanctions, limits, holds. All policy, all decided before a posting is written.</p></div>
+      <div><h3>What an exchange rate should be</h3><p>Converting $100 to &euro;92 is two postings committed together. The ledger records that both happened and has no opinion on the rate.</p></div>
+      <div><h3>Whether real money moved</h3><p>A deposit says value crossed this ledger's edge. Confirming cash reached a bank account is reconciliation, against a statement.</p></div>
+      <div><h3>What an account means</h3><p><code>users:alice:wallet</code> is a string. The hierarchy is your convention; the ledger indexes it without understanding it.</p></div>
+      <div><h3>How to retry</h3><p>It makes retrying safe. Send the same <code>Idempotency-Key</code> and the original transaction comes back rather than a second one. Send that key with different contents and it is an error, not a silent success for a payment that never happened.</p></div>
+    </div>
   </div>
 </section>
 

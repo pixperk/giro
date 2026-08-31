@@ -77,8 +77,12 @@ just migrate
 just serve
 ```
 
-Then open <http://localhost:8080/docs>, which renders the contract and can call
-the running service.
+Then open <http://localhost:8080>, a page that explains the model and drives the
+running service: create a ledger, commit transactions, watch the balances and
+the hash chain, and see a real rejection. `?ledger=<name>` adopts an existing
+one, so a populated demo can be linked to.
+
+<http://localhost:8080/docs> renders the contract and can call it too.
 
 `just` on its own lists every recipe. `just check` runs everything CI runs.
 
