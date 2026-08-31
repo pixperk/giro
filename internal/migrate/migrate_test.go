@@ -377,7 +377,12 @@ func TestStatus(t *testing.T) {
 	_, root := dir(t, map[string]string{
 		"20260101000001_first.sql":  "create table first (id int);",
 		"20260101000002_second.sql": "create table second (id int);",
-		"20260101000003_third.sql":  noTransactionDirective + "\ncreate index concurrently on first (id);",
+		// the directive, but not create index concurrently: that waits for every
+		// transaction in the database that could see the table, so it deadlocks
+		// against anything else running. applying it is covered by
+		// TestNoTransactionDirective; here Status only has to report it, which
+		// comes from parsing the file.
+		"20260101000003_third.sql": noTransactionDirective + "\ncreate table third (id int);",
 	})
 
 	t.Run("before anything has run", func(t *testing.T) {
