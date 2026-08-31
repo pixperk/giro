@@ -34,6 +34,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions", s.listTransactions)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions/{id}", s.getTransaction)
 
+	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions/{id}/revert", s.revertTransaction)
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions/{id}/metadata", s.setTransactionMetadata)
 	s.mux.HandleFunc("DELETE /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}", s.deleteTransactionMetadata)
 

@@ -45,7 +45,8 @@ func classify(err error) (status int, code ErrorCode, message string) {
 
 	case errors.Is(err, storage.ErrIdempotencyMismatch):
 		return http.StatusConflict, IDEMPOTENCYMISMATCH, err.Error()
-	case errors.Is(err, storage.ErrDuplicateReference), errors.Is(err, storage.ErrLedgerExists):
+	case errors.Is(err, storage.ErrDuplicateReference), errors.Is(err, storage.ErrLedgerExists),
+		errors.Is(err, storage.ErrAlreadyReverted):
 		return http.StatusConflict, CONFLICT, err.Error()
 
 	case errors.Is(err, storage.ErrNoPostings), errors.Is(err, storage.ErrInvalidCursor),

@@ -57,6 +57,18 @@ type DeleteMetadataPayload struct {
 	Key        string             `json:"key"`
 }
 
+// what a reversal records: which transaction was undone, and the transaction
+// that undid it. both, because a reader of the log should not have to join
+// against anything to understand the entry.
+type RevertedTransactionPayload struct {
+	RevertedTransactionID int64        `json:"revertedTransactionId"`
+	Transaction           *Transaction `json:"transaction"`
+}
+
+// RevertsKey marks a reversal with the id of the transaction it undoes, so the
+// pair can be found from either side without a dedicated column.
+const RevertsKey = "giro/reverts"
+
 // ChainHash covers the previous entry's hash as well as this entry's bytes, so
 // editing any historical entry invalidates every hash after it. hashing each
 // entry alone would let someone rewrite one and recompute just its own digest.

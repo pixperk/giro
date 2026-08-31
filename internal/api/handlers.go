@@ -288,3 +288,34 @@ func transactionID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	}
 	return id, true
 }
+
+func (s *Server) revertTransaction(w http.ResponseWriter, r *http.Request) {
+	id, ok := transactionID(w, r)
+	if !ok {
+		return
+	}
+
+	// the body is optional, so an empty one means both flags off
+	var body RevertRequest
+	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+		return
+	}
+
+	opts := storage.RevertOptions{}
+	if body.AtEffectiveDate != nil {
+		opts.AtEffectiveDate = *body.AtEffectiveDate
+	}
+	if body.Force != nil {
+		opts.Force = *body.Force
+	}
+
+	result, err := s.store(r.PathValue("ledger")).RevertTransaction(r.Context(), id, opts)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, Reversal{
+		Original: toAPITransaction(result.Original),
+		Reversal: toAPITransaction(result.Reversal),
+	})
+}

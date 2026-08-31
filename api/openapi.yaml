@@ -136,6 +136,52 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/Error" }
 
+  /v1/ledgers/{ledger}/transactions/{id}/revert:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+      - $ref: "#/components/parameters/TransactionID"
+    post:
+      tags: [transactions]
+      summary: Revert a transaction
+      description: |
+        Commits a new transaction holding the original's postings with both
+        sides swapped. The original is never edited or deleted: it keeps its
+        postings and gains a `revertedAt` mark saying a correction exists.
+
+        The reversal is an ordinary transaction with its own id, and it can
+        fail. If the money has since been spent it is not there to give back,
+        and the reversal is rejected for insufficient funds like any other
+        transaction would be.
+
+        Balances return to where they were. Volumes do not: both counters go up,
+        so the rows record that money moved and then came back, rather than
+        looking like it never moved.
+      operationId: revertTransaction
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevertRequest" }
+      responses:
+        "201":
+          description: Reverted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reversal" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Already reverted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The reversal cannot be applied, usually because the money has been spent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        default: { $ref: "#/components/responses/Error" }
+
   /v1/ledgers/{ledger}/transactions/{id}/metadata:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"
@@ -518,6 +564,41 @@ components:
           type: object
           description: Present only when requested with `expand=volumes`.
           additionalProperties: { $ref: "#/components/schemas/Volumes" }
+
+    RevertRequest:
+      type: object
+      properties:
+        atEffectiveDate:
+          type: boolean
+          default: false
+          description: |
+            Date the reversal with the original's effective date rather than
+            now. Off by default: a reversal happens when it happens, and
+            backdating one rewrites what historical balances say about a period
+            that has probably already been reported on.
+        force:
+          type: boolean
+          default: false
+          description: |
+            Commit even if an account other than `world` ends below zero.
+
+            A reversal can legitimately fail. This manufactures a negative
+            balance instead, and exists for an operator who has decided that is
+            the lesser problem.
+
+    Reversal:
+      type: object
+      required: [original, reversal]
+      description: The pair, so a caller does not have to fetch the other half.
+      properties:
+        original:
+          allOf:
+            - $ref: "#/components/schemas/Transaction"
+          description: The transaction that was undone, now carrying `revertedAt`.
+        reversal:
+          allOf:
+            - $ref: "#/components/schemas/Transaction"
+          description: The transaction that undid it, tagged with `giro/reverts`.
 
     Ledger:
       type: object

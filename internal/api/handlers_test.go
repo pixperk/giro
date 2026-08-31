@@ -561,3 +561,100 @@ func TestMetadataAppearsInTheLog(t *testing.T) {
 		t.Errorf("log payload does not identify its target: %s", page.Items[1].Data)
 	}
 }
+
+func TestRevertEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 10000)
+	if rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{posting("users:alice", "users:bob", "USD/2", 3000)},
+	}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body.String())
+	}
+
+	// the body is optional
+	rec := do(t, s, http.MethodPost, base+"/transactions/2/revert", nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+
+	got := decode[Reversal](t, rec)
+	if got.Original.RevertedAt == nil {
+		t.Error("the original is not marked as reverted")
+	}
+	if got.Reversal.Id == got.Original.Id {
+		t.Error("the reversal must be its own transaction")
+	}
+	if (*got.Reversal.Metadata)["giro/reverts"] != "2" {
+		t.Errorf("reversal metadata = %v, want a giro/reverts tag", got.Reversal.Metadata)
+	}
+	if got.Reversal.Postings[0].Source != "users:bob" {
+		t.Errorf("reversal moves %s -> %s, want the other way round",
+			got.Reversal.Postings[0].Source, got.Reversal.Postings[0].Destination)
+	}
+
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/users:alice/balances", nil))
+	if balances["USD/2"].Cmp(big.NewInt(10000)) != 0 {
+		t.Errorf("alice = %s, want 10000", balances["USD/2"])
+	}
+
+	again := do(t, s, http.MethodPost, base+"/transactions/2/revert", nil)
+	if again.Code != http.StatusConflict {
+		t.Errorf("second revert = %d, want 409", again.Code)
+	}
+	if code := decode[Error](t, again).Code; code != CONFLICT {
+		t.Errorf("code = %s", code)
+	}
+}
+
+// spending the money first makes the reversal unapplyable, which is 422 and
+// not a server fault.
+func TestRevertRejectedWhenTheMoneyIsSpent(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 10000)
+	do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{posting("users:alice", "users:bob", "USD/2", 3000)},
+	})
+	do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{posting("users:bob", "users:carol", "USD/2", 3000)},
+	})
+
+	rec := do(t, s, http.MethodPost, base+"/transactions/2/revert", nil)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	if code := decode[Error](t, rec).Code; code != INSUFFICIENTFUNDS {
+		t.Errorf("code = %s", code)
+	}
+
+	// and force gets it through
+	forced := do(t, s, http.MethodPost, base+"/transactions/2/revert", map[string]any{"force": true})
+	if forced.Code != http.StatusCreated {
+		t.Fatalf("forced revert = %d: %s", forced.Code, forced.Body.String())
+	}
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/users:bob/balances", nil))
+	if balances["USD/2"].Sign() >= 0 {
+		t.Errorf("bob = %s, want negative: force is what it says", balances["USD/2"])
+	}
+}
+
+func TestRevertAtEffectiveDateOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "users:alice", 10000)
+
+	created := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings":  []map[string]any{posting("users:alice", "users:bob", "USD/2", 3000)},
+		"timestamp": "2026-03-01T12:00:00Z",
+	})
+	original := decode[Transaction](t, created)
+
+	rec := do(t, s, http.MethodPost, base+"/transactions/2/revert", map[string]any{"atEffectiveDate": true})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if got := decode[Reversal](t, rec); !got.Reversal.Timestamp.Equal(original.Timestamp) {
+		t.Errorf("reversal dated %v, want the original's %v", got.Reversal.Timestamp, original.Timestamp)
+	}
+}

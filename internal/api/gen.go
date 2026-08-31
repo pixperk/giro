@@ -195,6 +195,31 @@ type Posting struct {
 	Source string `json:"source"`
 }
 
+// Reversal The pair, so a caller does not have to fetch the other half.
+type Reversal struct {
+	// Original The transaction that was undone, now carrying `revertedAt`.
+	Original Transaction `json:"original"`
+
+	// Reversal The transaction that undid it, tagged with `giro/reverts`.
+	Reversal Transaction `json:"reversal"`
+}
+
+// RevertRequest defines model for RevertRequest.
+type RevertRequest struct {
+	// AtEffectiveDate Date the reversal with the original's effective date rather than
+	// now. Off by default: a reversal happens when it happens, and
+	// backdating one rewrites what historical balances say about a period
+	// that has probably already been reported on.
+	AtEffectiveDate *bool `json:"atEffectiveDate,omitempty"`
+
+	// Force Commit even if an account other than `world` ends below zero.
+	//
+	// A reversal can legitimately fail. This manufactures a negative
+	// balance instead, and exists for an operator who has decided that is
+	// the lesser problem.
+	Force *bool `json:"force,omitempty"`
+}
+
 // Transaction defines model for Transaction.
 type Transaction struct {
 	Id int64 `json:"id"`
@@ -332,3 +357,6 @@ type CreateTransactionJSONRequestBody = CreateTransactionRequest
 
 // SetTransactionMetadataJSONRequestBody defines body for SetTransactionMetadata for application/json ContentType.
 type SetTransactionMetadataJSONRequestBody = Metadata
+
+// RevertTransactionJSONRequestBody defines body for RevertTransaction for application/json ContentType.
+type RevertTransactionJSONRequestBody = RevertRequest

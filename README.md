@@ -89,7 +89,12 @@ POST   /v1/ledgers/{ledger}                          create a ledger
 POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header
 GET    /v1/ledgers/{ledger}/transactions             list, cursor paginated
 GET    /v1/ledgers/{ledger}/transactions/{id}
+POST   /v1/ledgers/{ledger}/transactions/{id}/revert
+POST   /v1/ledgers/{ledger}/transactions/{id}/metadata
+DELETE /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}
 GET    /v1/ledgers/{ledger}/accounts/{address}       ?expand=volumes
+POST   /v1/ledgers/{ledger}/accounts/{address}/metadata
+DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}
 GET    /v1/ledgers/{ledger}/accounts/{address}/balances
 GET    /v1/ledgers/{ledger}/balances                 ?prefix=users:
 GET    /v1/ledgers/{ledger}/logs                     the audit trail
@@ -491,6 +496,40 @@ been used creates the row rather than returning a 404.
 That is the moment a caller most wants it: attaching a user id to a wallet
 before any money has moved through it. The account still holds nothing, since
 tagging is not funding.
+
+
+### D24. A revert is a new transaction, and it can fail
+
+Reverting does not edit or delete anything. It commits a new transaction
+holding the original's postings with both sides swapped, and stamps
+`revertedAt` on the original as a mark that a correction exists.
+
+Balances return to where they were. Volumes do not: both counters go up, so the
+rows record that money moved and then came back, rather than looking like it
+never moved.
+
+The reversal goes through the same locking, balance check and log append as any
+other transaction, which means it can be **rejected**. If the money has since
+been spent it is not there to give back, and forcing it would manufacture a
+negative balance. `force` exists for an operator who has decided that is the
+lesser problem, and it is a deliberate act rather than a default.
+
+Two guards worth knowing about. `revertedAt` is set inside the same database
+transaction as the reversal, so two concurrent reverts cannot both pass the
+check and refund twice. And the reversal reverses the *order* of the postings as
+well as their direction, because keeping the order would pay the first account
+back before the last had returned anything, and an intermediate account would
+dip below zero.
+
+### D25. A reversal is dated now, unless asked otherwise
+
+By default the reversal carries the current time, not the original's effective
+date. A reversal happens when it happens, and backdating one rewrites what
+historical balances say about a period that has probably already been reported
+on.
+
+`atEffectiveDate` asks for the other behaviour, for the case where the reversal
+is correcting a data entry error rather than undoing a real movement.
 
 
 ## Layout

@@ -92,60 +92,12 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 		}
 	}
 
-	// already sorted by (account, asset) in the domain layer. that ordering is
-	// the lock order, and it is deterministic across processes.
-	updates := p.VolumeUpdates()
-
-	before, err := s.lockVolumes(ctx, tx, updates)
+	transaction, alloc, err := s.applyTransaction(ctx, tx, p, applyOptions{
+		Timestamp: opts.Timestamp,
+		Reference: opts.Reference,
+		Metadata:  opts.Metadata,
+	})
 	if err != nil {
-		return nil, err
-	}
-
-	if s.afterLock != nil {
-		s.afterLock()
-	}
-
-	if err := checkBalances(before, updates); err != nil {
-		return nil, err
-	}
-
-	if err := s.applyVolumes(ctx, tx, updates); err != nil {
-		return nil, err
-	}
-
-	timestamp := opts.Timestamp
-	if timestamp.IsZero() {
-		timestamp = time.Now()
-	}
-	// postgres timestamptz holds microseconds. truncating here means the value
-	// we return is the value that was stored, rather than one carrying
-	// precision the database silently drops on the way in.
-	//
-	// this is invisible on macos, whose clock is already microsecond granular,
-	// and shows up immediately on linux.
-	timestamp = timestamp.UTC().Truncate(time.Microsecond)
-
-	alloc, err := s.allocate(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	transaction := &ledger.Transaction{
-		ID:                alloc.transactionID,
-		Postings:          p,
-		Timestamp:         timestamp,
-		Reference:         opts.Reference,
-		Metadata:          opts.Metadata,
-		PostCommitVolumes: postCommitVolumes(before, updates),
-	}
-
-	if err := s.insertTransaction(ctx, tx, transaction); err != nil {
-		return nil, err
-	}
-	if err := s.upsertAccounts(ctx, tx, updates, timestamp); err != nil {
-		return nil, err
-	}
-	if err := s.insertMoves(ctx, tx, transaction, before); err != nil {
 		return nil, err
 	}
 
@@ -168,6 +120,85 @@ func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOp
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return transaction, nil
+}
+
+type applyOptions struct {
+	Timestamp time.Time
+	Reference string
+	Metadata  ledger.Metadata
+
+	// commit even if an account other than world ends below zero. only a
+	// reversal offers this, and only to an operator who means it.
+	Force bool
+}
+
+// applyTransaction is everything a commit does except appending the log entry
+// and committing: lock, check, apply, allocate, insert.
+//
+// it takes an open transaction rather than starting one, because a revert
+// needs to do all of this and then stamp the original row, all atomically.
+func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postings, opts applyOptions) (*ledger.Transaction, allocation, error) {
+	// already sorted by (account, asset) in the domain layer. that ordering is
+	// the lock order, and it is deterministic across processes.
+	updates := p.VolumeUpdates()
+
+	var alloc allocation
+
+	before, err := s.lockVolumes(ctx, tx, updates)
+	if err != nil {
+		return nil, alloc, err
+	}
+
+	if s.afterLock != nil {
+		s.afterLock()
+	}
+
+	if !opts.Force {
+		if err := checkBalances(before, updates); err != nil {
+			return nil, alloc, err
+		}
+	}
+
+	if err := s.applyVolumes(ctx, tx, updates); err != nil {
+		return nil, alloc, err
+	}
+
+	timestamp := opts.Timestamp
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	// postgres timestamptz holds microseconds. truncating here means the value
+	// we return is the value that was stored, rather than one carrying
+	// precision the database silently drops on the way in.
+	//
+	// this is invisible on macos, whose clock is already microsecond granular,
+	// and shows up immediately on linux.
+	timestamp = timestamp.UTC().Truncate(time.Microsecond)
+
+	alloc, err = s.allocate(ctx, tx)
+	if err != nil {
+		return nil, alloc, err
+	}
+
+	transaction := &ledger.Transaction{
+		ID:                alloc.transactionID,
+		Postings:          p,
+		Timestamp:         timestamp,
+		Reference:         opts.Reference,
+		Metadata:          opts.Metadata,
+		PostCommitVolumes: postCommitVolumes(before, updates),
+	}
+
+	if err := s.insertTransaction(ctx, tx, transaction); err != nil {
+		return nil, alloc, err
+	}
+	if err := s.upsertAccounts(ctx, tx, updates, timestamp); err != nil {
+		return nil, alloc, err
+	}
+	if err := s.insertMoves(ctx, tx, transaction, before); err != nil {
+		return nil, alloc, err
+	}
+	return transaction, alloc, nil
 }
 
 // checkBalances rejects the transaction if any account other than world would

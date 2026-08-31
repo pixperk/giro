@@ -57,8 +57,14 @@ func hydrateTransaction(t *ledger.Transaction, postings, metadata, pcv []byte) e
 			return fmt.Errorf("decode post commit volumes: %w", err)
 		}
 	}
+	// every timestamp on the way out, or the same instant serialises
+	// differently depending on the server's zone
 	t.Timestamp = t.Timestamp.UTC()
 	t.InsertedAt = t.InsertedAt.UTC()
+	if t.RevertedAt != nil {
+		utc := t.RevertedAt.UTC()
+		t.RevertedAt = &utc
+	}
 	return nil
 }
 
