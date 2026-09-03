@@ -42,7 +42,7 @@ func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transactio
 	effective := copyVolumes(effectiveBefore)
 
 	batch := &pgx.Batch{}
-	queue := func(address, asset string, amount *big.Int, isSource bool) {
+	queue := func(address ledger.Address, asset ledger.Asset, amount *big.Int, isSource bool) {
 		k := key{address, asset}
 		apply(running, k, amount, isSource)
 		apply(effective, k, amount, isSource)
@@ -204,9 +204,11 @@ func apply(m map[key]ledger.Volumes, k key, amount *big.Int, isSource bool) {
 func pairs(updates []ledger.VolumeUpdate) (addresses, assets []string) {
 	addresses = make([]string, len(updates))
 	assets = make([]string, len(updates))
+	// converted at the edge: the sql driver encodes []string, and a named
+	// string type is not the same type to it.
 	for i, u := range updates {
-		addresses[i] = u.Account
-		assets[i] = u.Asset
+		addresses[i] = string(u.Account)
+		assets[i] = string(u.Asset)
 	}
 	return addresses, assets
 }

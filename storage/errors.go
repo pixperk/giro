@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"github.com/pixperk/giro/ledger"
 	"math/big"
 )
 
@@ -18,8 +19,8 @@ var (
 // ran out and by how much, because "insufficient funds" alone is useless when
 // a transaction touches a dozen accounts.
 type InsufficientFundsError struct {
-	Account   string
-	Asset     string
+	Account   ledger.Address
+	Asset     ledger.Asset
 	Available *big.Int
 	Requested *big.Int
 }

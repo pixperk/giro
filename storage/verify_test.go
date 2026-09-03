@@ -114,7 +114,7 @@ func TestProjectionCatchesADeletedVolumeRow(t *testing.T) {
 func TestProjectionSurvivesRandomActivity(t *testing.T) {
 	ctx, s, _ := testStore(t)
 
-	accounts := []string{"alice", "bob", "carol", "fees:platform"}
+	accounts := []ledger.Address{"alice", "bob", "carol", "fees:platform"}
 	rng := rand.New(rand.NewPCG(3, 5))
 	for _, a := range accounts {
 		fund(t, ctx, s, a, 1_000_000)

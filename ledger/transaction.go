@@ -57,11 +57,11 @@ func truncate(s string) string {
 
 // the volumes of every account a transaction touched, immediately after it
 // committed. account -> asset -> volumes.
-type PostCommitVolumes map[string]map[string]Volumes
+type PostCommitVolumes map[Address]map[Asset]Volumes
 
-func (v PostCommitVolumes) Set(account, asset string, vol Volumes) {
+func (v PostCommitVolumes) Set(account Address, asset Asset, vol Volumes) {
 	if v[account] == nil {
-		v[account] = map[string]Volumes{}
+		v[account] = map[Asset]Volumes{}
 	}
 	v[account][asset] = vol
 }

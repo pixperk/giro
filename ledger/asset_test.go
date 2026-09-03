@@ -35,8 +35,8 @@ func TestValidateAsset(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.why, func(t *testing.T) {
-			if got := ValidateAsset(tc.asset); got != tc.want {
-				t.Errorf("ValidateAsset(%q) = %v, want %v", tc.asset, got, tc.want)
+			if got := Asset(tc.asset).Valid(); got != tc.want {
+				t.Errorf("Asset(%q).Valid() = %v, want %v", tc.asset, got, tc.want)
 			}
 		})
 	}
@@ -64,9 +64,9 @@ func TestAssetScale(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.asset, func(t *testing.T) {
-			scale, ok := AssetScale(tc.asset)
+			scale, ok := Asset(tc.asset).Scale()
 			if scale != tc.wantScale || ok != tc.wantOK {
-				t.Errorf("AssetScale(%q) = (%d, %v), want (%d, %v)",
+				t.Errorf("Asset(%q).Scale() = (%d, %v), want (%d, %v)",
 					tc.asset, scale, ok, tc.wantScale, tc.wantOK)
 			}
 		})

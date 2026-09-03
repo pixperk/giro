@@ -187,7 +187,7 @@ flowchart TD
     A["collect every (account, asset) the postings touch"] --> B
     B["sort by account, then asset<br/>(consistent lock order everywhere)"] --> C
     C["insert zero rows ON CONFLICT DO NOTHING<br/>then SELECT ... FOR UPDATE<br/>(you cannot lock a row that does not exist)"] --> D
-    D{"any non-world account<br/>ending below zero?"}
+    D{"any account ending below zero<br/>without permission to?"}
     D -->|yes| R["reject: insufficient funds"]
     D -->|no| E["UPDATE ... SET input = input + n<br/>relative, never absolute"]
     E --> F["allocate id: UPDATE ledgers ... RETURNING"]
@@ -659,7 +659,30 @@ sixty times slower and growing.
 Both now read the snapshot. This was found by benchmarking, not by any
 correctness test: the results were identical either way.
 
-### D32. Going below zero is a permission on a row, not a name
+### D32. Addresses and assets are named types
+
+`ledger.Address` and `ledger.Asset` rather than `string`. Both are strings
+underneath, so nothing changes at runtime or in the database.
+
+The value is in application code above this library, where an address is
+carried through several layers before it reaches a posting. That is where a
+transposed argument survives review, and where the compiler now refuses it.
+
+It does not catch a transposed literal, because an untyped constant converts to
+any string type. `SetAllowNegative(ctx, "USD/2", "cost:peg", true)` still
+compiles and is refused at runtime by validation instead. And nothing catches a
+transposed source and destination, since both are addresses. No type system
+can.
+
+The wire format is unaffected. The generated types in `internal/api/gen.go` use
+`string`, because the contract describes JSON, and the domain types stop at
+that boundary.
+
+Done immediately after the packages became importable, while nothing outside
+the module depended on them. It is a breaking change, and every day it waits
+is another consumer to coordinate with.
+
+### D33. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

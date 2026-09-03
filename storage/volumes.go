@@ -13,8 +13,8 @@ import (
 
 // identifies one accounts_volumes row.
 type key struct {
-	account string
-	asset   string
+	account ledger.Address
+	asset   ledger.Asset
 }
 
 // one accounts_volumes row as it stood when the commit path locked it: the

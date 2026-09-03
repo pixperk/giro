@@ -18,13 +18,13 @@ import (
 
 // one half of a posting, from the point of view of a single account.
 type Move struct {
-	Seq           int64     `json:"seq"`
-	TransactionID int64     `json:"transactionId"`
-	Asset         string    `json:"asset"`
-	Amount        *big.Int  `json:"amount"`
-	Incoming      bool      `json:"incoming"`
-	EffectiveDate time.Time `json:"effectiveDate"`
-	InsertionDate time.Time `json:"insertionDate"`
+	Seq           int64        `json:"seq"`
+	TransactionID int64        `json:"transactionId"`
+	Asset         ledger.Asset `json:"asset"`
+	Amount        *big.Int     `json:"amount"`
+	Incoming      bool         `json:"incoming"`
+	EffectiveDate time.Time    `json:"effectiveDate"`
+	InsertionDate time.Time    `json:"insertionDate"`
 
 	// the account's volumes immediately after this move, in each ordering.
 	// Volumes is frozen; EffectiveVolumes is rewritten when something lands
@@ -40,10 +40,10 @@ func (m Move) Balance() *big.Int { return m.Volumes.Balance() }
 // it like everything else. a cursor that dropped the account it was created for
 // would silently return an empty page rather than continuing the walk.
 type MoveFilter struct {
-	Address string     `json:"address"`
-	Asset   string     `json:"asset,omitempty"`
-	From    *time.Time `json:"from,omitempty"`
-	To      *time.Time `json:"to,omitempty"`
+	Address ledger.Address `json:"address"`
+	Asset   ledger.Asset   `json:"asset,omitempty"`
+	From    *time.Time     `json:"from,omitempty"`
+	To      *time.Time     `json:"to,omitempty"`
 }
 
 type ListMovesQuery struct {

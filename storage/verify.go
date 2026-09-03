@@ -14,10 +14,11 @@ import (
 // ProjectionMismatch names one account and asset where the stored volumes
 // disagree with what the log says they should be.
 type ProjectionMismatch struct {
-	Account, Asset string
-	Stored, Want   ledger.Volumes
-	Missing        bool // the log expects this row and there is none
-	Extra          bool // the row exists and the log never mentions it
+	Account      ledger.Address
+	Asset        ledger.Asset
+	Stored, Want ledger.Volumes
+	Missing      bool // the log expects this row and there is none
+	Extra        bool // the row exists and the log never mentions it
 }
 
 func (e *ProjectionMismatch) Error() string {

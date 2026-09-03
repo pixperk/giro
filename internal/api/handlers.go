@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pixperk/giro/ledger"
 	"github.com/pixperk/giro/storage"
 )
 
@@ -90,7 +91,7 @@ func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 		Limit:  limit,
 		Cursor: params.Get("cursor"),
 		Filter: storage.TransactionFilter{
-			Account:       params.Get("account"),
+			Account:       ledger.Address(params.Get("account")),
 			AccountPrefix: params.Get("accountPrefix"),
 			Reference:     params.Get("reference"),
 		},
@@ -157,7 +158,7 @@ func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a, err := s.store(r.PathValue("ledger")).GetAccount(r.Context(), r.PathValue("address"), opts...)
+	a, err := s.store(r.PathValue("ledger")).GetAccount(r.Context(), ledger.Address(r.PathValue("address")), opts...)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -176,11 +177,11 @@ func (s *Server) getBalances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := s.store(r.PathValue("ledger"))
-	address := r.PathValue("address")
+	address := ledger.Address(r.PathValue("address"))
 
 	// asking for a date reads the effective view, which differs from the
 	// current one whenever something has been backdated.
-	var balances map[string]*big.Int
+	var balances map[ledger.Asset]*big.Int
 	var err error
 	if at.IsZero() {
 		balances, err = store.GetBalances(r.Context(), address)
@@ -352,7 +353,7 @@ func (s *Server) setAccountMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a, err := s.store(r.PathValue("ledger")).
-		SetAccountMetadata(r.Context(), r.PathValue("address"), map[string]string(m))
+		SetAccountMetadata(r.Context(), ledger.Address(r.PathValue("address")), map[string]string(m))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -362,7 +363,7 @@ func (s *Server) setAccountMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteAccountMetadata(w http.ResponseWriter, r *http.Request) {
 	a, err := s.store(r.PathValue("ledger")).
-		DeleteAccountMetadataKey(r.Context(), r.PathValue("address"), r.PathValue("key"))
+		DeleteAccountMetadataKey(r.Context(), ledger.Address(r.PathValue("address")), r.PathValue("key"))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -432,8 +433,8 @@ func (s *Server) listMoves(w http.ResponseWriter, r *http.Request) {
 		Limit:  limit,
 		Cursor: params.Get("cursor"),
 		Filter: storage.MoveFilter{
-			Address: r.PathValue("address"),
-			Asset:   params.Get("asset"),
+			Address: ledger.Address(r.PathValue("address")),
+			Asset:   ledger.Asset(params.Get("asset")),
 			From:    from,
 			To:      to,
 		},

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
-	"strings"
 )
 
 // volumes are two counters per (account, asset) that only ever increase.
@@ -36,8 +35,10 @@ func orZero(i *big.Int) *big.Int {
 
 // the volume delta a transaction applies to one (account, asset) pair.
 type VolumeUpdate struct {
-	Account, Asset string
-	Input, Output  *big.Int
+	Account Address
+	Asset   Asset
+	Input   *big.Int
+	Output  *big.Int
 }
 
 // the volume deltas a transaction applies, one entry per distinct
@@ -51,10 +52,13 @@ type VolumeUpdate struct {
 // order used at commit time, and taking locks in a globally consistent order
 // is what makes deadlock structurally impossible rather than merely unlikely.
 func (p Postings) VolumeUpdates() []VolumeUpdate {
-	type key struct{ account, asset string }
+	type key struct {
+		account Address
+		asset   Asset
+	}
 
 	index := make(map[key]*VolumeUpdate, 2*len(p))
-	at := func(account, asset string) *VolumeUpdate {
+	at := func(account Address, asset Asset) *VolumeUpdate {
 		k := key{account, asset}
 		u, ok := index[k]
 		if !ok {
@@ -92,8 +96,8 @@ func (p Postings) VolumeUpdates() []VolumeUpdate {
 	// deterministic across processes.
 	slices.SortFunc(updates, func(a, b VolumeUpdate) int {
 		return cmp.Or(
-			strings.Compare(a.Account, b.Account),
-			strings.Compare(a.Asset, b.Asset),
+			cmp.Compare(a.Account, b.Account),
+			cmp.Compare(a.Asset, b.Asset),
 		)
 	})
 	return updates

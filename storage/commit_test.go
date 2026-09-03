@@ -96,7 +96,7 @@ func testCounter() int {
 	return counter
 }
 
-func balance(t testing.TB, ctx context.Context, pool *pgxpool.Pool, address, asset string) *big.Int {
+func balance(t testing.TB, ctx context.Context, pool *pgxpool.Pool, address ledger.Address, asset ledger.Asset) *big.Int {
 	t.Helper()
 	var s string
 	err := pool.QueryRow(ctx,
@@ -129,7 +129,7 @@ func assertConserved(t testing.TB, ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
-func fund(t testing.TB, ctx context.Context, s *Store, account string, amount int64) {
+func fund(t testing.TB, ctx context.Context, s *Store, account ledger.Address, amount int64) {
 	t.Helper()
 	_, err := s.CommitTransaction(ctx, ledger.Postings{
 		{Source: "world", Destination: account, Asset: "USD/2", Amount: n(amount)},
@@ -318,7 +318,7 @@ func TestConcurrentSpendCannotOverdraw(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, results[i] = s.CommitTransaction(ctx, ledger.Postings{
-				{Source: "users:alice", Destination: fmt.Sprintf("users:bob:%d", i), Asset: "USD/2", Amount: n(10)},
+				{Source: "users:alice", Destination: ledger.Address(fmt.Sprintf("users:bob:%d", i)), Asset: "USD/2", Amount: n(10)},
 			}, CommitOptions{})
 		}()
 	}

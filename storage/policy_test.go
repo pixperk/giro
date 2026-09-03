@@ -273,7 +273,7 @@ func TestPegAbsorptionBalancesTheBook(t *testing.T) {
 		t.Fatalf("booking the deal: %v", err)
 	}
 
-	want := map[string]int64{
+	want := map[ledger.Address]int64{
 		"ops:usd":                0, // a conduit, not a store. nothing stranded.
 		"revenue:conversion_fee": conversion,
 		"revenue:wire_fee":       wire,
@@ -331,7 +331,10 @@ func TestNegativeBalancesSurviveVerification(t *testing.T) {
 func TestSetAllowNegativeValidatesItsArguments(t *testing.T) {
 	ctx, s, _ := testStore(t)
 
-	for _, tc := range []struct{ address, asset string }{
+	for _, tc := range []struct {
+		address ledger.Address
+		asset   ledger.Asset
+	}{
 		{"", "USD/2"},
 		{"a::b", "USD/2"},
 		{"ops:usd", ""},

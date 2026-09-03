@@ -15,10 +15,10 @@ import (
 )
 
 // world is the boundary of the ledger, standing for everything not tracked
-// here. it is the only account allowed a negative balance, because otherwise
-// the first deposit would have nowhere to come from and the ledger could never
-// be started.
-const WorldAccount = "world"
+// here. it is created permitted a negative balance, because otherwise the
+// first deposit would have nowhere to come from and the ledger could never be
+// started.
+const WorldAccount Address = "world"
 
 var (
 	ErrInvalidSourceAddress      = errors.New("invalid source address")
@@ -47,9 +47,9 @@ const maxAmountBits = 333
 // Amount is always positive. direction is already carried by which field an
 // account sits in, so a sign would be a second way of saying the same thing.
 type Posting struct {
-	Source      string   `json:"source"`
-	Destination string   `json:"destination"`
-	Asset       string   `json:"asset"`
+	Source      Address  `json:"source"`
+	Destination Address  `json:"destination"`
+	Asset       Asset    `json:"asset"`
 	Amount      *big.Int `json:"amount"`
 }
 
@@ -61,13 +61,13 @@ type Postings []Posting
 // or (-1, nil) if all are valid.
 func (p Postings) Validate() (int, error) {
 	for i, posting := range p {
-		if !ValidateAddress(posting.Source) {
+		if !posting.Source.Valid() {
 			return i, ErrInvalidSourceAddress
 		}
-		if !ValidateAddress(posting.Destination) {
+		if !posting.Destination.Valid() {
 			return i, ErrInvalidDestinationAddress
 		}
-		if !ValidateAsset(posting.Asset) {
+		if !posting.Asset.Valid() {
 			return i, ErrInvalidAsset
 		}
 		if posting.Amount == nil || posting.Amount.Sign() < 0 {

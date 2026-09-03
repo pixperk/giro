@@ -49,7 +49,10 @@ const (
 // setup.
 func setUpChartOfAccounts(t *testing.T, ctx context.Context, s *Store) {
 	t.Helper()
-	for _, a := range []struct{ address, asset string }{
+	for _, a := range []struct {
+		address ledger.Address
+		asset   ledger.Asset
+	}{
 		{chainTron, "USDT/6"},
 		{krakenUSDT, "USDT/6"},
 		{krakenUSD, "USD/2"},
@@ -117,8 +120,8 @@ func TestOffRampEndToEnd(t *testing.T) {
 		{Source: ops, Destination: bank, Asset: "USD/2", Amount: n(toClient)},
 	})
 
-	want := map[string]struct {
-		asset string
+	want := map[ledger.Address]struct {
+		asset ledger.Asset
 		value *big.Int
 		why   string
 	}{
@@ -155,8 +158,8 @@ func TestBoundaryBalancesAreReconciliationAnchors(t *testing.T) {
 	setUpChartOfAccounts(t, ctx, s)
 	runOneDeal(t, ctx, s)
 
-	anchors := map[string]struct {
-		asset  string
+	anchors := map[ledger.Address]struct {
+		asset  ledger.Asset
 		value  int64
 		verify string
 	}{

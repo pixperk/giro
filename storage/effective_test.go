@@ -14,7 +14,7 @@ func day(n int) time.Time {
 	return time.Date(2026, 3, n, 12, 0, 0, 0, time.UTC)
 }
 
-func commitAt(t *testing.T, ctx context.Context, s *Store, from, to string, amount int64, at time.Time) *ledger.Transaction {
+func commitAt(t *testing.T, ctx context.Context, s *Store, from, to ledger.Address, amount int64, at time.Time) *ledger.Transaction {
 	t.Helper()
 	tx, err := s.CommitTransaction(ctx, ledger.Postings{
 		{Source: from, Destination: to, Asset: "USD/2", Amount: n(amount)},
@@ -236,7 +236,7 @@ func TestRevertMaintainsEffectiveVolumes(t *testing.T) {
 func TestEffectiveVolumesSurviveRandomOrdering(t *testing.T) {
 	ctx, s, _ := testStore(t)
 
-	accounts := []string{"alice", "bob", "carol"}
+	accounts := []ledger.Address{"alice", "bob", "carol"}
 	rng := rand.New(rand.NewPCG(7, 11))
 
 	// fund everyone far in the past so nothing runs out

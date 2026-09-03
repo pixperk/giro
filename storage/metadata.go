@@ -73,8 +73,8 @@ func (s *Store) DeleteTransactionMetadataKey(ctx context.Context, id int64, key 
 // accounts are never registered, so tagging one before its first payment is
 // exactly when a caller would want to: attaching a user id to a wallet is not
 // something to defer until money has moved through it.
-func (s *Store) SetAccountMetadata(ctx context.Context, address string, m ledger.Metadata) (*ledger.Account, error) {
-	if !ledger.ValidateAddress(address) {
+func (s *Store) SetAccountMetadata(ctx context.Context, address ledger.Address, m ledger.Metadata) (*ledger.Account, error) {
+	if !address.Valid() {
 		return nil, fmt.Errorf("%w: invalid address %q", ledger.ErrInvalidSourceAddress, address)
 	}
 	if err := validateMetadata(m); err != nil {
@@ -96,7 +96,7 @@ func (s *Store) SetAccountMetadata(ctx context.Context, address string, m ledger
 				   set metadata = accounts.metadata || excluded.metadata,
 				       updated_at = excluded.updated_at
 				 where not (accounts.metadata @> excluded.metadata)`,
-				s.ledger, address, ledger.Segments(address), now, raw)
+				s.ledger, address, address.Segments(), now, raw)
 			if err != nil {
 				return false, err
 			}
@@ -105,7 +105,7 @@ func (s *Store) SetAccountMetadata(ctx context.Context, address string, m ledger
 		ledger.LogSetMetadata,
 		ledger.SetMetadataPayload{
 			TargetType: ledger.TargetAccount,
-			TargetID:   address,
+			TargetID:   string(address),
 			Metadata:   m,
 		}); err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *Store) SetAccountMetadata(ctx context.Context, address string, m ledger
 	return s.GetAccount(ctx, address)
 }
 
-func (s *Store) DeleteAccountMetadataKey(ctx context.Context, address, key string) (*ledger.Account, error) {
+func (s *Store) DeleteAccountMetadataKey(ctx context.Context, address ledger.Address, key string) (*ledger.Account, error) {
 	if key == "" {
 		return nil, ledger.ErrEmptyMetadataKey
 	}
@@ -125,7 +125,7 @@ func (s *Store) DeleteAccountMetadataKey(ctx context.Context, address, key strin
 		ledger.LogDeleteMetadata,
 		ledger.DeleteMetadataPayload{
 			TargetType: ledger.TargetAccount,
-			TargetID:   address,
+			TargetID:   string(address),
 			Key:        key,
 		}); err != nil {
 		return nil, err

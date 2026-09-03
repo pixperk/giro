@@ -44,11 +44,11 @@ var ErrWorldMustAllowNegative = errors.New("world must be allowed a negative bal
 // the row is created if the account has never been touched, so a book can be
 // set up before it is used rather than only after something has moved through
 // it.
-func (s *Store) SetAllowNegative(ctx context.Context, address, asset string, allow bool) error {
-	if !ledger.ValidateAddress(address) {
+func (s *Store) SetAllowNegative(ctx context.Context, address ledger.Address, asset ledger.Asset, allow bool) error {
+	if !address.Valid() {
 		return fmt.Errorf("invalid account address %q", address)
 	}
-	if !ledger.ValidateAsset(asset) {
+	if !asset.Valid() {
 		return fmt.Errorf("invalid asset %q", asset)
 	}
 	if address == ledger.WorldAccount && !allow {
@@ -70,8 +70,9 @@ func (s *Store) SetAllowNegative(ctx context.Context, address, asset string, all
 // UnpermittedNegative names one account and asset holding a negative balance
 // it is not permitted to hold.
 type UnpermittedNegative struct {
-	Account, Asset string
-	Balance        *big.Int
+	Account ledger.Address
+	Asset   ledger.Asset
+	Balance *big.Int
 }
 
 func (e *UnpermittedNegative) Error() string {
@@ -139,7 +140,7 @@ func (s *Store) VerifyBalancePermissions(ctx context.Context) (checked int, err 
 //
 // an account that has never been touched reports whatever it would be created
 // with, so the answer does not depend on whether anything has moved yet.
-func (s *Store) AllowsNegative(ctx context.Context, address, asset string) (bool, error) {
+func (s *Store) AllowsNegative(ctx context.Context, address ledger.Address, asset ledger.Asset) (bool, error) {
 	var allow bool
 	err := s.pool.QueryRow(ctx, `
 		select allow_negative from accounts_volumes

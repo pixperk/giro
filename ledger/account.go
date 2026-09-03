@@ -6,7 +6,7 @@ import "time"
 // record exists for metadata and prefix queries: an address absent from it
 // still has a balance, which is zero.
 type Account struct {
-	Address  string   `json:"address"`
+	Address  Address  `json:"address"`
 	Metadata Metadata `json:"metadata,omitempty"`
 
 	// the earliest effective date this account has been involved in, which a
@@ -20,6 +20,6 @@ type Account struct {
 	//
 	// Volumes is what the account holds now. EffectiveVolumes is what it held
 	// as of a date, which differs whenever a transaction has been backdated.
-	Volumes          map[string]Volumes `json:"volumes,omitempty"`
-	EffectiveVolumes map[string]Volumes `json:"effectiveVolumes,omitempty"`
+	Volumes          map[Asset]Volumes `json:"volumes,omitempty"`
+	EffectiveVolumes map[Asset]Volumes `json:"effectiveVolumes,omitempty"`
 }

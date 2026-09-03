@@ -35,8 +35,8 @@ func TestValidateAddress(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.why, func(t *testing.T) {
-			if got := ValidateAddress(tc.addr); got != tc.want {
-				t.Errorf("ValidateAddress(%q) = %v, want %v", tc.addr, got, tc.want)
+			if got := Address(tc.addr).Valid(); got != tc.want {
+				t.Errorf("Address(%q).Valid() = %v, want %v", tc.addr, got, tc.want)
 			}
 		})
 	}
@@ -54,8 +54,8 @@ func TestSegments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.addr, func(t *testing.T) {
-			if got := Segments(tc.addr); !slices.Equal(got, tc.want) {
-				t.Errorf("Segments(%q) = %v, want %v", tc.addr, got, tc.want)
+			if got := Address(tc.addr).Segments(); !slices.Equal(got, tc.want) {
+				t.Errorf("Address(%q).Segments() = %v, want %v", tc.addr, got, tc.want)
 			}
 		})
 	}

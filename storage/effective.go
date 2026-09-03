@@ -19,7 +19,7 @@ import (
 //
 // the snapshot is maintained on write, which is the fast half of a trade whose
 // slow half lives in VerifyEffectiveVolumes.
-func (s *Store) GetBalancesAt(ctx context.Context, address string, at time.Time) (map[string]*big.Int, error) {
+func (s *Store) GetBalancesAt(ctx context.Context, address ledger.Address, at time.Time) (map[ledger.Asset]*big.Int, error) {
 	rows, err := s.pool.Query(ctx, `
 		select distinct on (asset) asset, pcev_input, pcev_output
 		  from moves
@@ -31,9 +31,9 @@ func (s *Store) GetBalancesAt(ctx context.Context, address string, at time.Time)
 	}
 	defer rows.Close()
 
-	out := map[string]*big.Int{}
+	out := map[ledger.Asset]*big.Int{}
 	for rows.Next() {
-		var asset string
+		var asset ledger.Asset
 		var in, o pgtype.Numeric
 		if err := rows.Scan(&asset, &in, &o); err != nil {
 			return nil, err
@@ -52,7 +52,7 @@ func (s *Store) GetBalancesAt(ctx context.Context, address string, at time.Time)
 }
 
 // GetEffectiveVolumesAt is the same read, keeping both counters.
-func (s *Store) GetEffectiveVolumesAt(ctx context.Context, address string, at time.Time) (map[string]ledger.Volumes, error) {
+func (s *Store) GetEffectiveVolumesAt(ctx context.Context, address ledger.Address, at time.Time) (map[ledger.Asset]ledger.Volumes, error) {
 	rows, err := s.pool.Query(ctx, `
 		select distinct on (asset) asset, pcev_input, pcev_output
 		  from moves
@@ -64,9 +64,9 @@ func (s *Store) GetEffectiveVolumesAt(ctx context.Context, address string, at ti
 	}
 	defer rows.Close()
 
-	out := map[string]ledger.Volumes{}
+	out := map[ledger.Asset]ledger.Volumes{}
 	for rows.Next() {
-		var asset string
+		var asset ledger.Asset
 		var in, o pgtype.Numeric
 		if err := rows.Scan(&asset, &in, &o); err != nil {
 			return nil, err
@@ -87,9 +87,10 @@ func (s *Store) GetEffectiveVolumesAt(ctx context.Context, address string, at ti
 // EffectiveVolumesMismatch names one move whose stored snapshot disagrees with
 // a replay of the history before it.
 type EffectiveVolumesMismatch struct {
-	Seq            int64
-	Account, Asset string
-	Stored, Want   ledger.Volumes
+	Seq          int64
+	Account      ledger.Address
+	Asset        ledger.Asset
+	Stored, Want ledger.Volumes
 }
 
 func (e *EffectiveVolumesMismatch) Error() string {

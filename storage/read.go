@@ -74,7 +74,7 @@ func hydrateTransaction(t *ledger.Transaction, postings, metadata, pcv []byte) e
 // an account with no row has no balances rather than an error, because an
 // address that was never touched and one that does not exist are the same
 // thing: zero either way.
-func (s *Store) GetBalances(ctx context.Context, address string) (map[string]*big.Int, error) {
+func (s *Store) GetBalances(ctx context.Context, address ledger.Address) (map[ledger.Asset]*big.Int, error) {
 	rows, err := s.pool.Query(ctx, `
 		select asset, input, output from accounts_volumes
 		 where ledger = $1 and address = $2
@@ -85,9 +85,9 @@ func (s *Store) GetBalances(ctx context.Context, address string) (map[string]*bi
 	}
 	defer rows.Close()
 
-	out := map[string]*big.Int{}
+	out := map[ledger.Asset]*big.Int{}
 	for rows.Next() {
-		var asset string
+		var asset ledger.Asset
 		var in, o pgtype.Numeric
 		if err := rows.Scan(&asset, &in, &o); err != nil {
 			return nil, err
@@ -111,7 +111,7 @@ func (s *Store) GetBalances(ctx context.Context, address string) (map[string]*bi
 // index rather than the gin index on the segments, because a trailing wildcard
 // is a range scan and measurably cheaper. gin containment is also wrong here:
 // it is position independent, so "users" would match "fees:users:refunds".
-func (s *Store) AggregateBalances(ctx context.Context, prefix string) (map[string]*big.Int, error) {
+func (s *Store) AggregateBalances(ctx context.Context, prefix string) (map[ledger.Asset]*big.Int, error) {
 	rows, err := s.pool.Query(ctx, `
 		select asset, sum(input), sum(output) from accounts_volumes
 		 where ledger = $1 and ($2 = '' or address like $2 || '%')
@@ -123,9 +123,9 @@ func (s *Store) AggregateBalances(ctx context.Context, prefix string) (map[strin
 	}
 	defer rows.Close()
 
-	out := map[string]*big.Int{}
+	out := map[ledger.Asset]*big.Int{}
 	for rows.Next() {
-		var asset string
+		var asset ledger.Asset
 		var in, o pgtype.Numeric
 		if err := rows.Scan(&asset, &in, &o); err != nil {
 			return nil, err
@@ -171,7 +171,7 @@ func WithEffectiveVolumes(at time.Time) AccountOption {
 	}
 }
 
-func (s *Store) GetAccount(ctx context.Context, address string, opts ...AccountOption) (*ledger.Account, error) {
+func (s *Store) GetAccount(ctx context.Context, address ledger.Address, opts ...AccountOption) (*ledger.Account, error) {
 	var o accountOptions
 	for _, apply := range opts {
 		apply(&o)
@@ -221,7 +221,7 @@ func (s *Store) GetAccount(ctx context.Context, address string, opts ...AccountO
 // GetVolumes returns the raw counters rather than the derived balance. gross
 // flow is information a balance destroys: an account that has settled millions
 // and now holds nothing looks identical to one never used.
-func (s *Store) GetVolumes(ctx context.Context, address string) (map[string]ledger.Volumes, error) {
+func (s *Store) GetVolumes(ctx context.Context, address ledger.Address) (map[ledger.Asset]ledger.Volumes, error) {
 	rows, err := s.pool.Query(ctx, `
 		select asset, input, output from accounts_volumes
 		 where ledger = $1 and address = $2
@@ -232,9 +232,9 @@ func (s *Store) GetVolumes(ctx context.Context, address string) (map[string]ledg
 	}
 	defer rows.Close()
 
-	out := map[string]ledger.Volumes{}
+	out := map[ledger.Asset]ledger.Volumes{}
 	for rows.Next() {
-		var asset string
+		var asset ledger.Asset
 		var in, o pgtype.Numeric
 		if err := rows.Scan(&asset, &in, &o); err != nil {
 			return nil, err
@@ -256,8 +256,10 @@ func (s *Store) GetVolumes(ctx context.Context, address string) (map[string]ledg
 
 type TransactionFilter struct {
 	// matches a transaction where this address is a source or a destination.
-	Account string `json:"account,omitempty"`
-	// matches every account under a prefix, for example "users:".
+	Account ledger.Address `json:"account,omitempty"`
+	// matches every account under a prefix, for example "users:". a prefix is
+	// not itself an address, since "users:" has an empty trailing segment, so
+	// it stays a string.
 	AccountPrefix string `json:"accountPrefix,omitempty"`
 	Reference     string `json:"reference,omitempty"`
 }

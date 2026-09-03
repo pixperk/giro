@@ -7,6 +7,7 @@ package storage
 // that cannot be built out of single commits.
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -171,10 +171,10 @@ func (s *Store) lockBatch(ctx context.Context, tx pgx.Tx, items []BatchItem) err
 	}
 
 	slices.SortFunc(all, func(a, b ledger.VolumeUpdate) int {
-		if c := strings.Compare(a.Account, b.Account); c != 0 {
-			return c
-		}
-		return strings.Compare(a.Asset, b.Asset)
+		return cmp.Or(
+			cmp.Compare(a.Account, b.Account),
+			cmp.Compare(a.Asset, b.Asset),
+		)
 	})
 
 	_, err := s.lockVolumes(ctx, tx, all)

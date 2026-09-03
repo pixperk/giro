@@ -19,7 +19,7 @@ import (
 	"github.com/pixperk/giro/ledger"
 )
 
-func transfer(from, to string, amount int64) ledger.Postings {
+func transfer(from, to ledger.Address, amount int64) ledger.Postings {
 	return ledger.Postings{
 		{Source: from, Destination: to, Asset: "USD/2", Amount: n(amount)},
 	}
@@ -53,7 +53,7 @@ func BenchmarkCommitHotAccount(b *testing.B) {
 			b.SetParallelism(callers)
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					dst := fmt.Sprintf("payee:%d", seq.Add(1))
+					dst := ledger.Address(fmt.Sprintf("payee:%d", seq.Add(1)))
 					if _, err := s.CommitTransaction(ctx, transfer("payer", dst, 1), CommitOptions{}); err != nil {
 						b.Error(err)
 						return
@@ -80,7 +80,7 @@ func BenchmarkCommitDisjointAccounts(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					i := seq.Add(1)
-					src, dst := fmt.Sprintf("a:%d", i), fmt.Sprintf("b:%d", i)
+					src, dst := ledger.Address(fmt.Sprintf("a:%d", i)), ledger.Address(fmt.Sprintf("b:%d", i))
 					if _, err := s.CommitTransaction(ctx,
 						ledger.Postings{
 							{Source: "world", Destination: src, Asset: "USD/2", Amount: n(10)},
@@ -120,7 +120,7 @@ func BenchmarkCommitAcrossLedgers(b *testing.B) {
 			i := seq.Add(1)
 			s := stores[i%ledgers]
 			if _, err := s.CommitTransaction(ctx,
-				transfer("payer", fmt.Sprintf("payee:%d", i), 1), CommitOptions{}); err != nil {
+				transfer("payer", ledger.Address(fmt.Sprintf("payee:%d", i)), 1), CommitOptions{}); err != nil {
 				b.Error(err)
 				return
 			}
@@ -142,7 +142,7 @@ func BenchmarkBatchVersusSingles(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; b.Loop(); i++ {
 			for j := range items {
-				items[j] = BatchItem{Postings: transfer("payer", fmt.Sprintf("p:%d:%d", i, j), 1)}
+				items[j] = BatchItem{Postings: transfer("payer", ledger.Address(fmt.Sprintf("p:%d:%d", i, j)), 1)}
 			}
 			if _, err := s.CommitBatch(ctx, items, CommitOptions{}); err != nil {
 				b.Fatal(err)
@@ -159,7 +159,7 @@ func BenchmarkBatchVersusSingles(b *testing.B) {
 		for i := 0; b.Loop(); i++ {
 			for j := range size {
 				if _, err := s.CommitTransaction(ctx,
-					transfer("payer", fmt.Sprintf("p:%d:%d", i, j), 1), CommitOptions{}); err != nil {
+					transfer("payer", ledger.Address(fmt.Sprintf("p:%d:%d", i, j)), 1), CommitOptions{}); err != nil {
 					b.Fatal(err)
 				}
 			}

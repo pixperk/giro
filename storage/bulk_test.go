@@ -9,7 +9,7 @@ import (
 	"github.com/pixperk/giro/ledger"
 )
 
-func item(from, to string, amount int64) BatchItem {
+func item(from, to ledger.Address, amount int64) BatchItem {
 	return BatchItem{Postings: ledger.Postings{
 		{Source: from, Destination: to, Asset: "USD/2", Amount: n(amount)},
 	}}

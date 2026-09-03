@@ -62,8 +62,8 @@ func (s *Store) insertTransaction(ctx context.Context, tx pgx.Tx, t *ledger.Tran
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		returning inserted_at`,
 		s.ledger, t.ID, t.Timestamp, reference, postings, metadata,
-		endpoints(t.Postings, func(p ledger.Posting) string { return p.Source }),
-		endpoints(t.Postings, func(p ledger.Posting) string { return p.Destination }),
+		endpoints(t.Postings, func(p ledger.Posting) string { return string(p.Source) }),
+		endpoints(t.Postings, func(p ledger.Posting) string { return string(p.Destination) }),
 		pcv,
 	).Scan(&t.InsertedAt)
 	t.InsertedAt = t.InsertedAt.UTC()
@@ -89,14 +89,14 @@ func (s *Store) upsertAccounts(ctx context.Context, tx pgx.Tx, updates []ledger.
 	// these row locks are taken in the same sequence by every transaction.
 	addresses := make([]string, 0, len(updates))
 	for _, u := range updates {
-		if len(addresses) == 0 || addresses[len(addresses)-1] != u.Account {
-			addresses = append(addresses, u.Account)
+		if len(addresses) == 0 || addresses[len(addresses)-1] != string(u.Account) {
+			addresses = append(addresses, string(u.Account))
 		}
 	}
 
 	segments := make([][]string, len(addresses))
 	for i, a := range addresses {
-		segments[i] = ledger.Segments(a)
+		segments[i] = ledger.Address(a).Segments()
 	}
 
 	batch := &pgx.Batch{}

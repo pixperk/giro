@@ -28,11 +28,13 @@ func toAPITransaction(t *ledger.Transaction) Transaction {
 		out.Metadata = &m
 	}
 	if len(t.PostCommitVolumes) > 0 {
+		// the wire types are plain strings: the contract in api/openapi.yaml
+		// describes json, and the domain types stop at this boundary.
 		pcv := map[string]map[string]Volumes{}
 		for account, byAsset := range t.PostCommitVolumes {
-			pcv[account] = map[string]Volumes{}
+			pcv[string(account)] = map[string]Volumes{}
 			for asset, v := range byAsset {
-				pcv[account][asset] = toAPIVolumes(v)
+				pcv[string(account)][string(asset)] = toAPIVolumes(v)
 			}
 		}
 		out.PostCommitVolumes = &pcv
@@ -44,9 +46,9 @@ func toAPIPostings(p ledger.Postings) []Posting {
 	out := make([]Posting, len(p))
 	for i, posting := range p {
 		out[i] = Posting{
-			Source:      posting.Source,
-			Destination: posting.Destination,
-			Asset:       posting.Asset,
+			Source:      string(posting.Source),
+			Destination: string(posting.Destination),
+			Asset:       string(posting.Asset),
 			Amount:      posting.Amount,
 		}
 	}
@@ -60,9 +62,9 @@ func fromAPIPostings(p []Posting) ledger.Postings {
 		// from a transaction the ledger has committed.
 		amount := new(big.Int).Set(posting.Amount)
 		out[i] = ledger.Posting{
-			Source:      posting.Source,
-			Destination: posting.Destination,
-			Asset:       posting.Asset,
+			Source:      ledger.Address(posting.Source),
+			Destination: ledger.Address(posting.Destination),
+			Asset:       ledger.Asset(posting.Asset),
 			Amount:      amount,
 		}
 	}
@@ -75,7 +77,7 @@ func toAPIVolumes(v ledger.Volumes) Volumes {
 
 func toAPIAccount(a *ledger.Account) Account {
 	out := Account{
-		Address:       a.Address,
+		Address:       string(a.Address),
 		FirstUsage:    a.FirstUsage,
 		InsertionDate: a.InsertionDate,
 		UpdatedAt:     a.UpdatedAt,
@@ -95,18 +97,18 @@ func toAPIAccount(a *ledger.Account) Account {
 	return out
 }
 
-func volumesMap(in map[string]ledger.Volumes) map[string]Volumes {
+func volumesMap(in map[ledger.Asset]ledger.Volumes) map[string]Volumes {
 	out := make(map[string]Volumes, len(in))
 	for asset, v := range in {
-		out[asset] = toAPIVolumes(v)
+		out[string(asset)] = toAPIVolumes(v)
 	}
 	return out
 }
 
-func toAPIBalances(b map[string]*big.Int) Balances {
+func toAPIBalances(b map[ledger.Asset]*big.Int) Balances {
 	out := Balances{}
 	for asset, amount := range b {
-		out[asset] = amount
+		out[string(asset)] = amount
 	}
 	return out
 }
@@ -130,7 +132,7 @@ func toAPIMove(m storage.Move) Move {
 	out := Move{
 		Seq:           m.Seq,
 		TransactionId: m.TransactionID,
-		Asset:         m.Asset,
+		Asset:         string(m.Asset),
 		Amount:        m.Amount,
 		Incoming:      m.Incoming,
 		EffectiveDate: m.EffectiveDate,

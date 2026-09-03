@@ -88,7 +88,7 @@ func TestVolumeUpdates(t *testing.T) {
 			"zzz BTC/8", "zzz USD/2",
 		}
 		for i, u := range got {
-			if key := u.Account + " " + u.Asset; key != want[i] {
+			if key := string(u.Account) + " " + string(u.Asset); key != want[i] {
 				t.Errorf("updates[%d] = %q, want %q", i, key, want[i])
 			}
 		}
@@ -133,8 +133,8 @@ func TestVolumeUpdatesOrderIsDeterministic(t *testing.T) {
 // the invariant everything else rests on: a transaction can move value around
 // but can never create or destroy it. holds per asset, for any postings.
 func TestVolumeUpdatesConserveValue(t *testing.T) {
-	accounts := []string{"world", "treasury", "users:alice", "users:bob", "fees:platform", "escrow:1"}
-	assets := []string{"USD/2", "EUR/2", "BTC/8", "POINTS"}
+	accounts := []Address{"world", "treasury", "users:alice", "users:bob", "fees:platform", "escrow:1"}
+	assets := []Asset{"USD/2", "EUR/2", "BTC/8", "POINTS"}
 	rng := rand.New(rand.NewPCG(1, 2))
 
 	for range 2000 {
@@ -148,7 +148,7 @@ func TestVolumeUpdatesConserveValue(t *testing.T) {
 			}
 		}
 
-		drift := map[string]*big.Int{}
+		drift := map[Asset]*big.Int{}
 		for _, u := range p.VolumeUpdates() {
 			if drift[u.Asset] == nil {
 				drift[u.Asset] = new(big.Int)
@@ -179,7 +179,7 @@ func TestVolumeUpdatesDirection(t *testing.T) {
 func orderOf(updates []VolumeUpdate) string {
 	keys := make([]string, len(updates))
 	for i, u := range updates {
-		keys[i] = u.Account + "/" + u.Asset
+		keys[i] = string(u.Account) + "/" + string(u.Asset)
 	}
 	return strings.Join(keys, ", ")
 }
