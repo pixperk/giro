@@ -195,6 +195,7 @@ func TestIsolationListLogs(t *testing.T) {
 // and verification must not walk across the boundary.
 func TestIsolationVerifyLog(t *testing.T) {
 	ctx, mine, theirs, pool := twoLedgers(t)
+	withoutGuards(t, ctx, pool, "logs")
 
 	if n, err := mine.VerifyLog(ctx); err != nil || n != 2 {
 		t.Errorf("verified %d entries, err %v, want 2 and nil", n, err)

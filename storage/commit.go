@@ -170,10 +170,16 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 		s.afterLock()
 	}
 
-	if !opts.Force {
-		if err := checkBalances(before, updates); err != nil {
-			return nil, alloc, err
+	if opts.Force {
+		// the same guard exists in the database, and it has no way to know an
+		// operator decided this overdraw was the lesser problem. set local, so
+		// the declaration dies with this transaction and covers only the
+		// statements that asked for it.
+		if _, err := tx.Exec(ctx, "set local giro.force_overdraw = 'on'"); err != nil {
+			return nil, alloc, fmt.Errorf("declare forced overdraw: %w", err)
 		}
+	} else if err := checkBalances(before, updates); err != nil {
+		return nil, alloc, err
 	}
 
 	if err := s.applyVolumes(ctx, tx, updates); err != nil {

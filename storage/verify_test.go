@@ -59,6 +59,7 @@ func TestProjectionAfterRevertAndMetadata(t *testing.T) {
 // the check has to notice a projection that quietly disagrees with its own log.
 func TestProjectionCatchesTamperedVolumes(t *testing.T) {
 	ctx, s, pool := testStore(t)
+	withoutGuards(t, ctx, pool, "accounts_volumes")
 	fund(t, ctx, s, "users:alice", 10000)
 
 	if _, err := pool.Exec(ctx,
@@ -95,6 +96,7 @@ func TestProjectionCatchesAnUnloggedTransaction(t *testing.T) {
 
 func TestProjectionCatchesADeletedVolumeRow(t *testing.T) {
 	ctx, s, pool := testStore(t)
+	withoutGuards(t, ctx, pool, "accounts_volumes")
 	fund(t, ctx, s, "users:alice", 10000)
 
 	if _, err := pool.Exec(ctx,

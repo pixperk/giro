@@ -438,6 +438,7 @@ func TestEveryTransactionAppendsAChainedLog(t *testing.T) {
 // the property the chain exists for: editing history invalidates it.
 func TestEditingAnEntryBreaksTheChain(t *testing.T) {
 	ctx, s, pool := testStore(t)
+	withoutGuards(t, ctx, pool, "logs")
 	fund(t, ctx, s, "users:alice", 10000)
 	fund(t, ctx, s, "users:bob", 10000)
 	fund(t, ctx, s, "users:carol", 10000)
@@ -465,6 +466,7 @@ func TestEditingAnEntryBreaksTheChain(t *testing.T) {
 // deleting an entry leaves a gap, which gapless ids make detectable.
 func TestDeletingAnEntryBreaksTheChain(t *testing.T) {
 	ctx, s, pool := testStore(t)
+	withoutGuards(t, ctx, pool, "logs")
 	fund(t, ctx, s, "users:alice", 100)
 	fund(t, ctx, s, "users:bob", 100)
 	fund(t, ctx, s, "users:carol", 100)
@@ -615,6 +617,7 @@ func TestRejectedTransactionWritesNoLog(t *testing.T) {
 // caught only because the next entry's hash covers this one.
 func TestRecomputingATamperedHashStillBreaksTheChain(t *testing.T) {
 	ctx, s, pool := testStore(t)
+	withoutGuards(t, ctx, pool, "logs")
 	fund(t, ctx, s, "users:alice", 10000)
 	fund(t, ctx, s, "users:bob", 10000)
 	fund(t, ctx, s, "users:carol", 10000)
@@ -764,4 +767,28 @@ func TestDryRunDoesNotClaimAnIdempotencyKey(t *testing.T) {
 	if real.ID != 1 {
 		t.Errorf("id = %d, want 1", real.ID)
 	}
+}
+
+// Some tests have to damage the book to prove the damage gets noticed, and the
+// database now refuses exactly that. So they ask for the guards to be lifted,
+// which is itself the point: after this migration, tampering takes a privilege
+// the application does not have and an explicit act somebody can see.
+//
+// It works here because tests run as the role that owns the tables. Under the
+// restricted application role it would fail, which is the correct outcome and
+// the reason the role split is worth doing.
+func withoutGuards(t testing.TB, ctx context.Context, pool *pgxpool.Pool, tables ...string) {
+	t.Helper()
+	for _, table := range tables {
+		if _, err := pool.Exec(ctx, "alter table "+table+" disable trigger user"); err != nil {
+			t.Fatalf("lifting guards on %s: %v", table, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, table := range tables {
+			if _, err := pool.Exec(ctx, "alter table "+table+" enable trigger user"); err != nil {
+				t.Errorf("restoring guards on %s: %v", table, err)
+			}
+		}
+	})
 }

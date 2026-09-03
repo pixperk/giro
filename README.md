@@ -164,8 +164,12 @@ erDiagram
     accounts ||--o{ accounts_volumes : "has balances in"
 ```
 
-`accounts_volumes` is the only table that is ever updated. Everything else is
-append only.
+Only `logs` is append only without qualification. `accounts_volumes` is updated
+by every commit, and three others change in narrow, named ways: a transaction
+is stamped when reverted and carries metadata, a move has its effective volumes
+rewritten when something lands behind it, and an account's metadata and first
+usage move. Nothing that was *recorded* ever changes, and the database enforces
+exactly that column by column (D34).
 
 The same facts live at three grains, and each answers a different question.
 
@@ -712,7 +716,63 @@ rollout, and nothing else would mention it.
 The check takes no lock and applies nothing. A process that serves traffic
 should not be able to change the schema.
 
-### D34. Going below zero is a permission on a row, not a name
+### D34. The invariants are enforced in the database, not only in Go
+
+Every rule used to live in Go, which holds exactly as long as the application
+is the only writer. It is not, and will not be: an engineer in psql, a backfill
+script, a migration nobody thought through, credentials that got out. None of
+those run the Go code.
+
+| Guard | Shape | Catches |
+|---|---|---|
+| Append only on `logs` | row `before update or delete` | rewriting history |
+| Named columns on `transactions`, `moves`, `accounts` | row, allow list | changing what was recorded |
+| No truncate, every table | **statement** `before truncate` | erasing a table |
+| Volumes only increase | row `before update` | faking a balance by lowering what was spent |
+| No unpermitted overdraw | row `before insert or update` | spending what is not there |
+| Conservation | **deferred constraint** | creating or destroying value |
+| Counters never fall | row `before update` | reusing a transaction id |
+
+Three of those are worth explaining.
+
+**Conservation cannot be a row trigger.** `input = input + 500000` is an
+increase, on one row, and nothing about that row is invalid. Conservation is a
+property of the whole table. It also cannot be checked per statement, because a
+commit writes one volume row at a time and passes through unbalanced
+intermediate states. So it is a constraint trigger deferred to commit, which
+asks the only question that matters: is the book balanced by the time this is
+over.
+
+**Truncate needs a different trigger shape.** It discards the table's files
+rather than visiting rows, so no row trigger fires and update and delete guards
+that look complete let the whole table go without raising anything. `before
+truncate` exists only in the statement form, for the same reason.
+
+**The lists say what is allowed, not what is forbidden.** A forbid list is only
+as good as the imagination of whoever wrote it, and a column added by a future
+migration arrives unprotected. Comparing whole rows with the permitted keys
+removed means a new column is guarded from the moment it exists.
+
+Two carve outs, both found by the test suite rather than by reasoning. The
+overdraw guard fires when the balance moves, not when the permission changes,
+so an operator can stop further drawdown on an account that is already
+negative. And a forced revert declares itself with a transaction local setting,
+because the database cannot otherwise know an operator decided a negative
+balance was the lesser problem. That second one is an escape hatch: anything
+able to set the flag can overdraw. It stops writes that never meant to
+overdraw, not an operator who has decided to.
+
+**The cost.** The conservation check is one aggregate over the accounts holding
+that asset, per touched row, at commit. Measured: 0.045 ms at a thousand
+accounts, 10.7 ms at two hundred thousand. Throughput fell about 8% across
+ledgers and is unchanged sequentially. It grows with the book, and if that ever
+matters the answer is a maintained total per asset rather than an aggregate.
+
+**What this does not do.** A table's owner outranks its own triggers and can
+disable them. Until the application connects as a role that cannot, these are a
+large improvement rather than a proof. That is the next step.
+
+### D35. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be
