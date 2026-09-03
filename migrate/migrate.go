@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -302,3 +304,95 @@ func Status(ctx context.Context, conn *pgx.Conn, fsys fs.FS) ([]MigrationStatus,
 }
 
 func quote(s string) string { return "'" + s + "'" }
+
+// a migration this binary carries has not been applied. the schema is behind
+// the code, so something the binary expects to exist does not.
+var ErrPending = errors.New("migrations pending")
+
+// the database has a migration this binary does not carry. the schema is ahead
+// of the code.
+//
+// separate from ErrMissing because it is not always a fault. the usual deploy
+// order is migrate first, then roll the binaries, so between those two steps
+// every old instance is running against a schema it has never heard of. that
+// is the deploy working, and refusing to start there would mean an old
+// instance could not be restarted during a rollout.
+//
+// it is a fault when it is permanent, which is why it is reported rather than
+// ignored, and left to the caller to decide.
+var ErrSchemaAhead = errors.New("schema is ahead of this binary")
+
+// RequireUpToDate reports whether the database schema matches what this binary
+// expects, and is meant to be called at boot before serving anything.
+//
+// Without it a binary needing a migration nobody ran starts cleanly, answers
+// its health check, and then fails on the first write with a raw SQL error
+// from inside a money path. The failure belongs at startup, where a deploy can
+// see it, rather than at the first transaction.
+//
+// Takes no lock, so it is safe to call while another process is migrating,
+// and it applies nothing: a process that serves traffic should not also be
+// able to change the schema.
+//
+// Returns ErrPending when the schema is behind, ErrChecksumDrift when a
+// migration was applied with a different body, and ErrSchemaAhead when the
+// database carries migrations this binary does not. Only the first two are
+// unambiguously fatal; see ErrSchemaAhead for why it is handed back rather
+// than decided here.
+func RequireUpToDate(ctx context.Context, conn *pgx.Conn, fsys fs.FS) error {
+	migrations, err := Load(fsys)
+	if err != nil {
+		return err
+	}
+
+	var exists bool
+	if err := conn.QueryRow(ctx,
+		"select to_regclass('schema_migrations') is not null").Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: nothing has ever been applied, run: giro migrate up", ErrPending)
+	}
+
+	done, err := loadApplied(ctx, conn)
+	if err != nil {
+		return err
+	}
+
+	// drift first: a migration applied with a different body means the schema
+	// and the code disagree about what ran, and no count of pending versions
+	// tells you anything useful after that.
+	onDisk := make(map[int64]Migration, len(migrations))
+	for _, m := range migrations {
+		onDisk[m.Version] = m
+		if a, ok := done[m.Version]; ok && a.Checksum != m.Checksum {
+			return fmt.Errorf("%w: %s was applied at %s with a different body",
+				ErrChecksumDrift, m.Filename, a.AppliedAt.Format(time.RFC3339))
+		}
+	}
+
+	var pending []string
+	for _, m := range migrations {
+		if _, ok := done[m.Version]; !ok {
+			pending = append(pending, m.Filename)
+		}
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("%w: %d not applied (%s), run: giro migrate up",
+			ErrPending, len(pending), strings.Join(pending, ", "))
+	}
+
+	var ahead []string
+	for version, a := range done {
+		if _, ok := onDisk[version]; !ok {
+			ahead = append(ahead, fmt.Sprintf("%d_%s", version, a.Name))
+		}
+	}
+	if len(ahead) > 0 {
+		slices.Sort(ahead)
+		return fmt.Errorf("%w: %d applied and not carried here (%s)",
+			ErrSchemaAhead, len(ahead), strings.Join(ahead, ", "))
+	}
+
+	return nil
+}

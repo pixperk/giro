@@ -682,7 +682,37 @@ Done immediately after the packages became importable, while nothing outside
 the module depended on them. It is a breaking change, and every day it waits
 is another consumer to coordinate with.
 
-### D33. Going below zero is a permission on a row, not a name
+### D33. The server refuses to start against a schema it does not match
+
+`giro serve` checks the applied migrations against the ones it carries, before
+it listens.
+
+Without it a binary needing a migration nobody ran starts cleanly, answers its
+health check, and fails on the first commit with a raw SQL error, in a money
+path, in front of a caller. A deploy can act on a process that will not start.
+It cannot act on one that started and lies.
+
+Three outcomes rather than two, because only two are faults:
+
+| State | Result |
+|---|---|
+| Schema behind the binary | Refuse. Something the code expects does not exist. |
+| A migration applied with a different body | Refuse. The schema and the code disagree about what ran. |
+| Schema ahead of the binary | Warn and serve. |
+
+The third is the one worth explaining. The usual deploy order is migrate first,
+then roll the binaries, so between those two steps every instance still on the
+old build is running against migrations it does not carry. That is the deploy
+working. Refusing there would mean an old instance could not be restarted
+during a rollout, turning a routine deploy into an outage.
+
+It is still reported, because the same state is a real fault if it outlives the
+rollout, and nothing else would mention it.
+
+The check takes no lock and applies nothing. A process that serves traffic
+should not be able to change the schema.
+
+### D34. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

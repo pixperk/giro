@@ -817,3 +817,129 @@ func TestLockWaitTimesOut(t *testing.T) {
 		t.Errorf("waited %s, want it bounded by lockWait", elapsed)
 	}
 }
+
+// a binary that boots against a schema it does not match will fail on the
+// first write instead, with a raw sql error, inside a money path. the four
+// states it has to tell apart are worth separating because only two of them
+// are faults.
+func TestRequireUpToDate(t *testing.T) {
+	files := map[string]string{
+		"20260101000001_first.sql":  "create table first (id int);",
+		"20260101000002_second.sql": "create table second (id int);",
+	}
+
+	t.Run("nothing has ever run", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		_, root := dir(t, files)
+
+		err := RequireUpToDate(ctx, conn, root.FS())
+		if !errors.Is(err, ErrPending) {
+			t.Fatalf("err = %v, want ErrPending", err)
+		}
+		if !strings.Contains(err.Error(), "giro migrate up") {
+			t.Errorf("err = %q, want it to say what to do", err)
+		}
+	})
+
+	t.Run("up to date", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		_, root := dir(t, files)
+		if _, err := Run(ctx, conn, root.FS()); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := RequireUpToDate(ctx, conn, root.FS()); err != nil {
+			t.Fatalf("a matching schema was refused: %v", err)
+		}
+	})
+
+	t.Run("schema behind the binary", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		// applied with only the first migration on disk
+		_, first := dir(t, map[string]string{
+			"20260101000001_first.sql": files["20260101000001_first.sql"],
+		})
+		if _, err := Run(ctx, conn, first.FS()); err != nil {
+			t.Fatal(err)
+		}
+
+		// the binary carries both
+		_, both := dir(t, files)
+		err := RequireUpToDate(ctx, conn, both.FS())
+		if !errors.Is(err, ErrPending) {
+			t.Fatalf("err = %v, want ErrPending", err)
+		}
+		if !strings.Contains(err.Error(), "20260101000002_second.sql") {
+			t.Errorf("err = %q, want it to name the pending migration", err)
+		}
+	})
+
+	// the state a rolling deploy passes through: migrations run first, so an
+	// instance still on the old build sees versions it does not carry. that is
+	// the deploy working, and refusing to start would mean an old instance
+	// could not be restarted during one.
+	t.Run("schema ahead of the binary", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		_, both := dir(t, files)
+		if _, err := Run(ctx, conn, both.FS()); err != nil {
+			t.Fatal(err)
+		}
+
+		_, first := dir(t, map[string]string{
+			"20260101000001_first.sql": files["20260101000001_first.sql"],
+		})
+		err := RequireUpToDate(ctx, conn, first.FS())
+		if !errors.Is(err, ErrSchemaAhead) {
+			t.Fatalf("err = %v, want ErrSchemaAhead", err)
+		}
+		// distinguishable from a fault, which is the whole reason it is its
+		// own error rather than ErrMissing
+		if errors.Is(err, ErrPending) || errors.Is(err, ErrChecksumDrift) {
+			t.Error("being ahead reads as a fatal condition")
+		}
+	})
+
+	t.Run("drift wins over anything else", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		d, root := dir(t, files)
+		if _, err := Run(ctx, conn, root.FS()); err != nil {
+			t.Fatal(err)
+		}
+
+		// edit an applied migration, and add an unapplied one, so both
+		// conditions hold at once
+		if err := os.WriteFile(filepath.Join(d, "20260101000001_first.sql"),
+			[]byte("create table first (id bigint);"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "20260101000003_third.sql"),
+			[]byte("create table third (id int);"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// drift is reported, not the pending count: once the schema and the
+		// code disagree about what ran, how many are outstanding tells you
+		// nothing useful.
+		if err := RequireUpToDate(ctx, conn, root.FS()); !errors.Is(err, ErrChecksumDrift) {
+			t.Fatalf("err = %v, want ErrChecksumDrift", err)
+		}
+	})
+
+	// it must be safe to call from a process that serves traffic, which should
+	// not be able to change the schema at all.
+	t.Run("applies nothing", func(t *testing.T) {
+		ctx, conn, _ := testConn(t)
+		_, root := dir(t, files)
+
+		for range 2 {
+			if err := RequireUpToDate(ctx, conn, root.FS()); !errors.Is(err, ErrPending) {
+				t.Fatalf("err = %v, want ErrPending", err)
+			}
+		}
+		var exists bool
+		conn.QueryRow(ctx, "select to_regclass('first') is not null").Scan(&exists)
+		if exists {
+			t.Error("the check created a table")
+		}
+	})
+}

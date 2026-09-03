@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	giro "github.com/pixperk/giro"
 	"github.com/pixperk/giro/internal/api"
+	"github.com/pixperk/giro/migrate"
 	"github.com/pixperk/giro/storage"
 )
 
@@ -55,6 +58,10 @@ func serveCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("ping: %w", err)
 	}
 
+	if err := checkSchema(ctx, pool); err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           api.NewServer(func(name string) *storage.Store { return storage.New(pool, name) }),
@@ -76,5 +83,40 @@ func serveCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Println("stopped")
+	return nil
+}
+
+// refuses to serve against a schema this binary does not match.
+//
+// the failure this prevents is a binary that boots cleanly, passes its health
+// check, and then fails on the first commit with a raw SQL error, in a money
+// path, in front of a caller. a deploy can act on a process that would not
+// start. it cannot act on one that started and lies.
+//
+// a schema ahead of this binary is warned about rather than refused. the usual
+// deploy order is migrate first, then roll the binaries, so between those steps
+// every instance still on the old build is running against migrations it does
+// not carry. refusing there would mean an old instance could not restart
+// during a rollout, which turns a routine deploy into an outage.
+func checkSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire: %w", err)
+	}
+	defer conn.Release()
+
+	sub, err := fs.Sub(giro.MigrationsFS, giro.MigrationsDir)
+	if err != nil {
+		return err
+	}
+
+	switch err := migrate.RequireUpToDate(ctx, conn.Conn(), sub); {
+	case errors.Is(err, migrate.ErrSchemaAhead):
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		fmt.Fprintln(os.Stderr, "  expected mid-rollout. investigate if it persists after the deploy.")
+		return nil
+	case err != nil:
+		return fmt.Errorf("schema check: %w", err)
+	}
 	return nil
 }
