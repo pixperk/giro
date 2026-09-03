@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/jackc/pgx/v5"
 
@@ -64,6 +65,74 @@ func (s *Store) SetAllowNegative(ctx context.Context, address, asset string, all
 		return fmt.Errorf("set allow_negative for %s/%s: %w", address, asset, err)
 	}
 	return nil
+}
+
+// UnpermittedNegative names one account and asset holding a negative balance
+// it is not permitted to hold.
+type UnpermittedNegative struct {
+	Account, Asset string
+	Balance        *big.Int
+}
+
+func (e *UnpermittedNegative) Error() string {
+	return fmt.Sprintf("%s %s: balance %s, and the account is not permitted to go negative",
+		e.Account, e.Asset, e.Balance)
+}
+
+// VerifyBalancePermissions finds accounts sitting below zero without the
+// permission to, and reports how many rows it checked.
+//
+// The commit path makes this state unreachable, so it should always find
+// nothing. It can still arise two ways, and they are worth telling apart.
+//
+// The mundane one: a permission was revoked while the account was already
+// negative. That leaves the balance where it is on purpose, because the
+// alternative is the ledger inventing a correcting transaction nobody
+// authorised. Expected, but somebody should know.
+//
+// The one that matters: the guard has a hole, or something wrote to
+// accounts_volumes without going through it. Every other check would pass. The
+// hash chain is intact because nothing was tampered with, conservation holds
+// because the other side of the posting is right there, and the projection
+// agrees because the log records exactly what was written. Only this notices.
+//
+// Not on the write path. Run it on a schedule, and alert on the absence of a
+// run as well as on findings: a detector that stopped running looks exactly
+// like a book with nothing wrong.
+func (s *Store) VerifyBalancePermissions(ctx context.Context) (checked int, err error) {
+	rows, err := s.pool.Query(ctx, `
+		select address, asset, (input - output)::text
+		  from accounts_volumes
+		 where ledger = $1 and not allow_negative and input < output
+		 order by address, asset`,
+		s.ledger)
+	if err != nil {
+		return 0, fmt.Errorf("verify balance permissions: %w", err)
+	}
+	defer rows.Close()
+
+	var found []error
+	for rows.Next() {
+		var e UnpermittedNegative
+		var balance string
+		if err := rows.Scan(&e.Account, &e.Asset, &balance); err != nil {
+			return 0, err
+		}
+		e.Balance, _ = new(big.Int).SetString(balance, 10)
+		found = append(found, &e)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	// the count is of rows examined, not rows returned: the query filters in
+	// the database, so a separate count is the only way to say "this actually
+	// looked at something" rather than "this found nothing".
+	if err := s.pool.QueryRow(ctx,
+		"select count(*) from accounts_volumes where ledger = $1", s.ledger).Scan(&checked); err != nil {
+		return 0, err
+	}
+	return checked, errors.Join(found...)
 }
 
 // AllowsNegative reports whether the account may end below zero in this asset.

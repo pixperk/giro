@@ -303,8 +303,9 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
         <p>The money is coming from outside a system that is closed by construction. <code>world</code> is that outside: a bank, a card network, somebody's pocket. The ledger does not know which, only that value crossed its edge.</p>
       </div>
       <div>
-        <p><code>world</code> is the only account allowed a negative balance, and that is arithmetic rather than privilege. It starts at zero like everything else, so if it could not go negative the first deposit would fail and so would every one after it.</p>
+        <p><code>world</code> is allowed a negative balance, and that is arithmetic rather than privilege. It starts at zero like everything else, so if it could not go negative the first deposit would fail and so would every one after it.</p>
         <p>Its balance is a measurement. At <b>&minus;$500</b> it reads: five hundred dollars entered this ledger and have not left. For a wallet product that number is your total customer liability, and it is the one that should match your bank statement.</p>
+        <p>Every other account is refused a negative balance unless somebody granted it one, per account and per asset. <code>world</code> carries that permission from creation rather than by being named in the code, so it is the first account to hold it rather than an exception beside the rule.</p>
         <p class="note">Think of chips on a poker table. Buying in takes chips from the rack. The rack is not a player and has no stack, and counting it gives you exactly the number of chips in play, negated.</p>
       </div>
     </div>

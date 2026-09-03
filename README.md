@@ -659,6 +659,39 @@ sixty times slower and growing.
 Both now read the snapshot. This was found by benchmarking, not by any
 correctness test: the results were identical either way.
 
+### D32. Going below zero is a permission on a row, not a name
+
+An account that spends money it does not have is the failure a ledger exists to
+prevent, so the balance guard refuses it. Two kinds of account have to be
+exempt, for different reasons.
+
+A boundary account stands for everything outside the ledger. Value entering has
+to come from somewhere, so the outside runs negative by exactly what is inside.
+A contra account is entirely internal and is a running total of a cost rather
+than a pot of money: it only ever emits, and it cannot run out.
+
+Both are the same shape to the guard, which cannot tell either apart from a
+client account about to be drained. So the permission is a column on
+`accounts_volumes`, default false, and `world` is created carrying it rather
+than being named in the source. There is no account name anywhere in the check.
+
+Per asset, not per account: one account can be a cost line in one asset and an
+ordinary balance in another.
+
+It lives on `accounts_volumes` rather than `accounts` because that is the row
+the commit path already takes `FOR UPDATE`. The permission is read under the
+same lock as the balance it governs, so it needs no second lock and adds no
+lock ordering to get wrong.
+
+A naming convention was the alternative and is what most ledgers do. It was
+turned down because a typo joins the exempt set silently. `externa1:bank:chase`
+is not a rejected address, it is a new account permitted to create money, and
+nothing about it looks wrong until a balance exists that should not.
+
+The cost is that a new account needs setting up before first use, and that is
+the right way round: forgetting is a refused transaction rather than an
+unnoticed one.
+
 
 ## Layout
 
@@ -686,6 +719,7 @@ rows.go        the individual inserts a commit performs
 moves.go       moves, and maintaining the two volume histories
 retry.go       which errors are worth retrying, and for how long
 volumes.go     locking and applying volume deltas
+policy.go      which accounts may end below zero
 revert.go      compensating transactions
 metadata.go    merge and delete, with the no-op guard
 read.go        queries and keyset pagination

@@ -163,6 +163,66 @@ func TestPermissionCanBeRevoked(t *testing.T) {
 	}
 }
 
+// revoking leaves an already negative balance where it is, because the
+// alternative is the ledger inventing a correcting transaction nobody
+// authorised. so the state exists and something has to look for it: every
+// other check passes, since nothing was tampered with and the posting that
+// created it was legitimate.
+func TestRevokingLeavesTheBalanceForTheDetector(t *testing.T) {
+	ctx, s, _ := testStore(t)
+
+	if err := s.SetAllowNegative(ctx, "cost:lp_fee", "USD/2", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "cost:lp_fee", Destination: "ops:usd", Asset: "USD/2", Amount: n(998)},
+	}, CommitOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if checked, err := s.VerifyBalancePermissions(ctx); err != nil {
+		t.Fatalf("a permitted negative balance was reported: %v", err)
+	} else if checked == 0 {
+		t.Error("the detector examined nothing and reported success")
+	}
+
+	if err := s.SetAllowNegative(ctx, "cost:lp_fee", "USD/2", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// everything else still passes, which is the point of having this check
+	if _, err := s.VerifyLog(ctx); err != nil {
+		t.Errorf("log: %v", err)
+	}
+	if _, err := s.VerifyProjection(ctx); err != nil {
+		t.Errorf("projection: %v", err)
+	}
+
+	var unpermitted *UnpermittedNegative
+	_, err := s.VerifyBalancePermissions(ctx)
+	if !errors.As(err, &unpermitted) {
+		t.Fatalf("err = %v, want UnpermittedNegative", err)
+	}
+	if unpermitted.Account != "cost:lp_fee" || unpermitted.Balance.Int64() != -998 {
+		t.Errorf("reported %s at %s, want cost:lp_fee at -998", unpermitted.Account, unpermitted.Balance)
+	}
+}
+
+// a book where nobody revoked anything has nothing to report, and says so
+// after looking rather than by not looking.
+func TestBalancePermissionsAreCleanOnAHealthyBook(t *testing.T) {
+	ctx, s, _ := testStore(t)
+	fund(t, ctx, s, "users:alice", 10000)
+
+	checked, err := s.VerifyBalancePermissions(ctx)
+	if err != nil {
+		t.Fatalf("healthy book reported: %v", err)
+	}
+	if checked != 2 {
+		t.Errorf("checked %d rows, want 2 (world and alice)", checked)
+	}
+}
+
 // the shape this whole feature exists for, with the real numbers from a
 // $100,000 off ramp.
 //
