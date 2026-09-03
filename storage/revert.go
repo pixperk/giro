@@ -21,14 +21,6 @@ type RevertOptions struct {
 	// and backdating one rewrites what historical balances say about a period
 	// that has probably already been reported on.
 	AtEffectiveDate bool
-
-	// commit even if an account other than world ends below zero.
-	//
-	// a reversal can legitimately fail: if the money has since been spent, it
-	// is not there to give back, and forcing it manufactures a negative
-	// balance. this exists for an operator who has decided that is the lesser
-	// problem, and should be hard to reach.
-	Force bool
 }
 
 // Reversal is the pair: what was undone, and what undid it.
@@ -87,7 +79,6 @@ func (s *Store) revertOnce(ctx context.Context, id int64, opts RevertOptions) (*
 	// a reversal that should succeed fails its balance check.
 	reversal, alloc, err := s.applyTransaction(ctx, tx, original.Postings.Reverse(), applyOptions{
 		Timestamp: timestamp,
-		Force:     opts.Force,
 		Metadata:  ledger.Metadata{ledger.RevertsKey: strconv.FormatInt(id, 10)},
 	})
 	if err != nil {

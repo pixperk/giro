@@ -753,14 +753,21 @@ as good as the imagination of whoever wrote it, and a column added by a future
 migration arrives unprotected. Comparing whole rows with the permitted keys
 removed means a new column is guarded from the moment it exists.
 
-Two carve outs, both found by the test suite rather than by reasoning. The
-overdraw guard fires when the balance moves, not when the permission changes,
-so an operator can stop further drawdown on an account that is already
-negative. And a forced revert declares itself with a transaction local setting,
-because the database cannot otherwise know an operator decided a negative
-balance was the lesser problem. That second one is an escape hatch: anything
-able to set the flag can overdraw. It stops writes that never meant to
-overdraw, not an operator who has decided to.
+One carve out, found by the test suite rather than by reasoning. The overdraw
+guard fires when the balance moves, not when the permission changes, so an
+operator can stop further drawdown on an account that is already negative.
+
+**There is no escape hatch, and there was.** An earlier version of this let a
+revert declare itself forced through a transaction local setting, so that a
+reversal could commit against an account that had since spent the money. Any
+role can set a custom setting, so the application role could set it too, which
+made the overdraw guard the only one of the seven the application could walk
+past. `RevertOptions.Force` is gone with it.
+
+An operator who needs a reversal that drives an account negative grants the
+account the permission, reverts, and revokes. Three steps that leave a trail in
+the permission state, and one of them is already the mechanism for exactly
+this.
 
 **The cost.** The conservation check is one aggregate over the accounts holding
 that asset, per touched row, at commit. Measured: 0.045 ms at a thousand

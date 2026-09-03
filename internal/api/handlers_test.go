@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -629,14 +630,28 @@ func TestRevertRejectedWhenTheMoneyIsSpent(t *testing.T) {
 		t.Errorf("code = %s", code)
 	}
 
-	// and force gets it through
-	forced := do(t, s, http.MethodPost, base+"/transactions/2/revert", map[string]any{"force": true})
-	if forced.Code != http.StatusCreated {
-		t.Fatalf("forced revert = %d: %s", forced.Code, forced.Body.String())
+	// there is no force flag, and asking for one is a rejected request rather
+	// than a silently ignored field. it was removed because it had to declare
+	// itself to the database guard through a setting any role can write, which
+	// made the overdraw guard the one the application could walk past.
+	asking := do(t, s, http.MethodPost, base+"/transactions/2/revert", map[string]any{"force": true})
+	if asking.Code != http.StatusBadRequest {
+		t.Fatalf("force = %d, want 400: an unknown field must not be ignored", asking.Code)
+	}
+
+	// the way through is to permit the account, which is a decision that
+	// leaves a trail rather than a flag on one request
+	store := s.store("demo")
+	if err := store.SetAllowNegative(context.Background(), "users:bob", "USD/2", true); err != nil {
+		t.Fatal(err)
+	}
+	permitted := do(t, s, http.MethodPost, base+"/transactions/2/revert", nil)
+	if permitted.Code != http.StatusCreated {
+		t.Fatalf("revert after permitting = %d: %s", permitted.Code, permitted.Body.String())
 	}
 	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/users:bob/balances", nil))
 	if balances["USD/2"].Sign() >= 0 {
-		t.Errorf("bob = %s, want negative: force is what it says", balances["USD/2"])
+		t.Errorf("bob = %s, want negative", balances["USD/2"])
 	}
 }
 

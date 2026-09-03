@@ -102,24 +102,62 @@ func TestRevertFailsWhenTheMoneyIsGone(t *testing.T) {
 	assertConserved(t, ctx, pool)
 }
 
-func TestForceRevertDrivesTheAccountNegative(t *testing.T) {
+// A reversal can legitimately fail: if the money has since been spent it is
+// not there to give back. There used to be a Force option that committed
+// anyway, and it is gone.
+//
+// It had to declare itself to the database, because the overdraw guard lives
+// there too and cannot know an operator decided a negative balance was the
+// lesser problem. That declaration was a transaction local setting, and any
+// role can set one -- including the application role, which made the overdraw
+// guard the only one the application could walk past.
+//
+// The permission mechanism already expresses "this account may go below zero",
+// so an operator who needs the reversal grants it, reverts, and revokes. Three
+// steps that leave a trail in the permission state, rather than one flag that
+// leaves none.
+func TestARevertThatWouldOverdrawIsRefusedUntilPermitted(t *testing.T) {
 	ctx, s, pool := testStore(t)
 	fund(t, ctx, s, "users:alice", 10000)
 	payment := mustCommit(t, ctx, s, "users:alice", "users:bob", 3000)
 	mustCommit(t, ctx, s, "users:bob", "users:carol", 3000)
 
-	if _, err := s.RevertTransaction(ctx, payment.ID, RevertOptions{Force: true}); err != nil {
+	// bob has spent it, so there is nothing to give back
+	_, err := s.RevertTransaction(ctx, payment.ID, RevertOptions{})
+	var insufficient *InsufficientFundsError
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("err = %v, want InsufficientFundsError", err)
+	}
+	if insufficient.Account != "users:bob" {
+		t.Errorf("refused %s, want users:bob", insufficient.Account)
+	}
+
+	// an operator decides the negative balance is the lesser problem, and says
+	// so in a statement that is visible afterwards
+	if err := s.SetAllowNegative(ctx, "users:bob", "USD/2", true); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.RevertTransaction(ctx, payment.ID, RevertOptions{}); err != nil {
+		t.Fatalf("revert after permitting: %v", err)
 	}
 
 	if got := balance(t, ctx, pool, "users:bob", "USD/2"); got.Cmp(n(-3000)) != 0 {
-		t.Errorf("bob = %s, want -3000: force is what it says", got)
+		t.Errorf("bob = %s, want -3000", got)
 	}
-	// value is still conserved even so. force breaks the no negatives rule,
-	// not the conservation one.
+
+	// and closing it again, which leaves the account negative and unpermitted
+	// for the detector to surface
+	if err := s.SetAllowNegative(ctx, "users:bob", "USD/2", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.VerifyBalancePermissions(ctx); err == nil {
+		t.Error("the detector did not report the negative unpermitted account")
+	}
+
+	// value is conserved throughout: permitting an overdraw relaxes the no
+	// negatives rule, never the conservation one
 	assertConserved(t, ctx, pool)
 }
-
 func TestRevertTwiceIsRejected(t *testing.T) {
 	ctx, s, _ := testStore(t)
 	fund(t, ctx, s, "users:alice", 10000)

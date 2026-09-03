@@ -256,13 +256,6 @@ type RevertRequest struct {
 	// backdating one rewrites what historical balances say about a period
 	// that has probably already been reported on.
 	AtEffectiveDate *bool `json:"atEffectiveDate,omitempty"`
-
-	// Force Commit even if an account other than `world` ends below zero.
-	//
-	// A reversal can legitimately fail. This manufactures a negative
-	// balance instead, and exists for an operator who has decided that is
-	// the lesser problem.
-	Force *bool `json:"force,omitempty"`
 }
 
 // Transaction defines model for Transaction.

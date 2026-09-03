@@ -157,7 +157,7 @@ create trigger accounts_volumes_monotonic before update on accounts_volumes
 -- account and the shortfall, which is what an api caller needs, and it runs
 -- before any write rather than after.
 --
--- two carve outs, both found by the test suite rather than by reasoning.
+-- one carve out, found by the test suite rather than by reasoning about it.
 --
 -- it fires when the balance moves, not when the permission changes. an
 -- operator revoking the permission on an account that is already negative is
@@ -167,24 +167,17 @@ create trigger accounts_volumes_monotonic before update on accounts_volumes
 -- and unpermitted afterwards, which is a state VerifyBalancePermissions
 -- exists to surface.
 --
--- and a revert may declare itself forced. a reversal can legitimately fail
--- when the money has since been spent, and RevertOptions.Force is an operator
--- deciding a negative balance is the lesser problem. the declaration is
--- transaction local, so it covers exactly the statements that asked for it.
---
--- that second one is an escape hatch and is worth naming as such: anything
--- that can set the flag can overdraw. it is not a hole in the sense of an
--- oversight, because forcing is a supported operation, but it does mean this
--- guard stops writes that never meant to overdraw rather than an operator who
--- has decided to.
+-- there is deliberately no escape hatch. an earlier version honoured a
+-- transaction local flag so that a forced revert could overdraw, and any role
+-- able to set a custom setting could then overdraw anything -- including the
+-- application role, which made this the one guard the application could walk
+-- past. an operator who needs a reversal that drives an account negative
+-- grants the account the permission, reverts, and revokes: three steps that
+-- leave a trail, instead of one flag that leaves none.
 create function giro_no_unpermitted_overdraw() returns trigger as $$
 begin
     if tg_op = 'UPDATE'
        and new.input = old.input and new.output = old.output then
-        return new;
-    end if;
-
-    if coalesce(current_setting('giro.force_overdraw', true), '') = 'on' then
         return new;
     end if;
 

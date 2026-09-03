@@ -396,9 +396,6 @@ func (s *Server) revertTransaction(w http.ResponseWriter, r *http.Request) {
 	if body.AtEffectiveDate != nil {
 		opts.AtEffectiveDate = *body.AtEffectiveDate
 	}
-	if body.Force != nil {
-		opts.Force = *body.Force
-	}
 
 	result, err := s.store(r.PathValue("ledger")).RevertTransaction(r.Context(), id, opts)
 	if err != nil {

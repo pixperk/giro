@@ -239,3 +239,54 @@ func TestGrantedColumnsAreStillGuarded(t *testing.T) {
 		t.Errorf("err = %v, want the conservation guard", err)
 	}
 }
+
+// The overdraw guard used to honour a transaction local flag, so that a forced
+// revert could commit anyway. Any role can set a custom setting, so the
+// application role could set it too and then overdraw anything. That made the
+// overdraw guard the only one of the seven the application could walk past.
+//
+// This is the exact statement sequence that worked before the flag was
+// removed.
+func TestTheApplicationRoleCannotOverdrawByDeclaringAnythingAtAll(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 10000)
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "set role giro_app"); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// still permitted: anyone may set a custom setting, which is the whole
+	// reason honouring one was a mistake
+	if _, err := tx.Exec(ctx, "set local giro.force_overdraw = 'on'"); err != nil {
+		t.Fatalf("setting a custom parameter: %v", err)
+	}
+
+	// conservation preserving, so only the overdraw guard stands in the way
+	_, err = tx.Exec(ctx, `
+		update accounts_volumes
+		   set output = output + case when address = 'users:alice' then 99999 else 0 end,
+		       input  = input  + case when address = 'world'       then 99999 else 0 end
+		 where ledger = 'main' and address in ('users:alice', 'world')`)
+	if err == nil {
+		t.Fatal("the application role overdrew an account by declaring itself forced")
+	}
+
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "23001" {
+		t.Fatalf("err = %v, want the overdraw guard (23001)", err)
+	}
+	if !strings.Contains(pg.Message, "not permitted a negative balance") {
+		t.Errorf("message = %q, want the overdraw guard", pg.Message)
+	}
+}
