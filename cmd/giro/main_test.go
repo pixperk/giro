@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // the cli is thin, but it is the layer where a real bug already hid: the up
@@ -340,5 +341,79 @@ func TestMigrateStatusShowsPendingBeforeApplying(t *testing.T) {
 	}
 	if !strings.Contains(out, "pending") {
 		t.Errorf("status on an empty database printed %q, want everything pending", out)
+	}
+}
+
+// same shape as captureOutput, for the boot warnings, which go to stderr so
+// they are not mistaken for the output of a command.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	original := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	done := make(chan string, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		done <- string(out)
+	}()
+
+	fn()
+
+	w.Close()
+	os.Stderr = original
+	return <-done
+}
+
+// The database enforces the invariants with triggers, and a table's owner can
+// switch its own triggers off. So serving as the owner makes every guard
+// advisory, and the one place anyone will notice is at boot.
+//
+// This is the check that says so. It is a warning rather than a refusal
+// because a local database and a first run legitimately connect as the owner,
+// and refusing would make the safe configuration the awkward one.
+func TestServeWarnsWhenItCanDisableItsOwnGuards(t *testing.T) {
+	ctx := context.Background()
+	url := isolatedDatabase(t)
+
+	if _, err := captureOutput(t, func() error { return dispatch(ctx, []string{"migrate", "up"}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	// as the owner, which is what DATABASE_URL points at in the test harness
+	warning := captureStderr(t, func() { warnIfPrivileged(ctx, pool) })
+	if !strings.Contains(warning, "guards can be disabled") {
+		t.Errorf("owner got no warning, output was %q", warning)
+	}
+	if !strings.Contains(warning, "giro_app") {
+		t.Errorf("the warning does not say what to do instead: %q", warning)
+	}
+
+	// and as a role that cannot, which is what a deployment should look like
+	restricted, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restricted.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "set role giro_app")
+		return err
+	}
+	quiet, err := pgxpool.NewWithConfig(ctx, restricted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer quiet.Close()
+
+	if warning := captureStderr(t, func() { warnIfPrivileged(ctx, quiet) }); warning != "" {
+		t.Errorf("the restricted role was warned anyway: %q", warning)
 	}
 }

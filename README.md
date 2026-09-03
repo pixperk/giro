@@ -75,8 +75,30 @@ Requires Go 1.26 and PostgreSQL 17.
 createdb giro && createdb giro_test
 cp .env.example .env          # then edit the connection strings
 just migrate
+just db-app-role              # the role the service should connect as
 just serve
 ```
+
+`.env` carries two connection strings on purpose. Migrations need the role that
+owns the tables; serving should not have it, because a table's owner can switch
+off the triggers that guard it. `just db-app-role` creates a local role with no
+privileges of its own that is a member of `giro_app`, and pointing
+`DATABASE_URL` at it is what makes the guarantees in D34 and D35 real rather
+than available.
+
+`just privileges` prints what the serving connection can actually do, which is
+the only version of that question that counts:
+
+```
+ current_user | superuser | owns_tables | can_append | can_erase | can_rewrite
+--------------+-----------+-------------+------------+-----------+-------------
+ giro_service | f         | f           | t          | f         | f
+```
+
+`giro serve` warns at boot if it is connected as something that can disable its
+own guards. It warns rather than refuses: a local database and a first run
+legitimately connect as the owner, and refusing would make the safe
+configuration the awkward one to reach.
 
 Then open <http://localhost:8080>, a page that explains the model and drives the
 running service: create a ledger, commit transactions, watch the balances and

@@ -61,6 +61,7 @@ func serveCommand(ctx context.Context, args []string) error {
 	if err := checkSchema(ctx, pool); err != nil {
 		return err
 	}
+	warnIfPrivileged(ctx, pool)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -119,4 +120,38 @@ func checkSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("schema check: %w", err)
 	}
 	return nil
+}
+
+// warns when the serving connection can switch off the guards protecting the
+// tables it is about to write to.
+//
+// the database enforces the invariants with triggers, and a table's owner
+// outranks its own triggers: "alter table logs disable trigger user" needs no
+// privilege beyond ownership. a superuser outranks everything. so connecting as
+// either means the guards are advisory, and the restricted role exists to stop
+// that being true.
+//
+// a warning rather than a refusal. a single-machine deployment, a local
+// database and a first run all legitimately connect as the owner, and refusing
+// would make the safe configuration the hard one to reach. saying so at every
+// boot is enough: it is in the logs, it is at the moment somebody is looking,
+// and it names what to do.
+func warnIfPrivileged(ctx context.Context, pool *pgxpool.Pool) {
+	var privileged bool
+	err := pool.QueryRow(ctx, `
+		select current_setting('is_superuser')::bool
+		    or pg_has_role(current_user, relowner, 'USAGE')
+		  from pg_class where oid = to_regclass('logs')`).Scan(&privileged)
+	if err != nil || !privileged {
+		return
+	}
+
+	var user string
+	_ = pool.QueryRow(ctx, "select current_user").Scan(&user)
+
+	fmt.Fprintf(os.Stderr,
+		"warning: connected as %q, which owns these tables or is a superuser.\n"+
+			"  the database guards can be disabled by this connection, so they are\n"+
+			"  advisory here. serve as a role with no privileges of its own that is a\n"+
+			"  member of giro_app instead. see: just db-app-role\n", user)
 }

@@ -26,7 +26,7 @@ _migrate CMD:
 
 # apply migrations to the test database
 migrate-test:
-    @DATABASE_URL="$GIRO_TEST_DATABASE_URL" go run ./cmd/giro migrate up
+    @GIRO_MIGRATE_DATABASE_URL="$GIRO_TEST_DATABASE_URL" go run ./cmd/giro migrate up
 
 # --- api ---
 
@@ -131,6 +131,26 @@ db-reset:
 db-reset-test:
     @psql "$GIRO_TEST_DATABASE_URL" -qc "drop schema public cascade; create schema public;"
     @just db-sweep
+
+# create the local login role the service should connect as: no privileges of
+# its own, and a member of giro_app.
+#
+# membership rather than "set role" on the application's own connection,
+# because postgres roles inherit by default and a role with nothing of its own
+# has nothing to fall back to. "reset role" is then not a way out of the
+# restriction, it is a way back to holding even less.
+#
+# no password: local connections here are trusted. a real deployment issues a
+# credential and keeps it wherever the rest of them live, not in the schema.
+db-app-role:
+    @psql "$DATABASE_URL" -q -c "do \$\$ begin       if not exists (select 1 from pg_roles where rolname = 'giro_service') then         create role giro_service login;       end if; end \$\$;" -c "grant giro_app to giro_service"
+    @echo "created giro_service, a member of giro_app."
+    @echo "point the serving DATABASE_URL at it. migrations still need the owner."
+
+# what the serving connection can actually do, which is the only version of
+# this that counts
+privileges:
+    @psql "$DATABASE_URL" -qc "select current_user,       current_setting('is_superuser')::bool as superuser,       pg_has_role(current_user, (select relowner from pg_class where oid = to_regclass('logs')), 'USAGE') as owns_tables,       has_table_privilege('logs','INSERT') as can_append,       has_table_privilege('logs','TRUNCATE') as can_erase,       has_table_privilege('logs','UPDATE') as can_rewrite"
 
 # every test makes its own schema and drops it on cleanup, but an interrupted
 # run leaves one behind and they accumulate invisibly. this sweeps them.
