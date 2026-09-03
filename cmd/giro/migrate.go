@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/pixperk/giro"
-	"github.com/pixperk/giro/internal/migrate"
+	"github.com/pixperk/giro/migrate"
 )
 
 const migrateUsage = `usage:
@@ -82,7 +82,7 @@ func migrateStatus(ctx context.Context, conn *pgx.Conn, fsys fs.FS) error {
 // writes to the real directory, not the embedded copy, which is read only.
 // the new file is only visible to migrate up after a rebuild.
 func migrateNew(name string) error {
-	path, err := migrate.New(giro.MigrationsDir, name)
+	path, err := migrate.Create(giro.MigrationsDir, name)
 	if err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pixperk/giro/internal/api"
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/storage"
 )
 
 const serveUsage = `usage:

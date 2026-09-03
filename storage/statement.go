@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 // one half of a posting, from the point of view of a single account.

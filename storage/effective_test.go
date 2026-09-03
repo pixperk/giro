@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func day(n int) time.Time {

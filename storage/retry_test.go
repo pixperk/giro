@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func deadlock() error {

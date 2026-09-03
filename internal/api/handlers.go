@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/storage"
 )
 
 func (s *Server) createLedger(w http.ResponseWriter, r *http.Request) {

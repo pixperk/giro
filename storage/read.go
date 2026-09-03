@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 // every query in this file carries `ledger = $1` from s.ledger, which is

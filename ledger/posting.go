@@ -1,3 +1,11 @@
+// Package ledger holds the domain: postings, transactions, volumes, addresses,
+// assets and log entries. It contains no sql and knows nothing about how any
+// of it is stored.
+//
+// A posting names both sides of a movement and carries an always positive
+// amount, so an unbalanced entry is not a state this package can represent.
+// A transaction is an ordered list of postings applied atomically, and it is
+// the only write the system has.
 package ledger
 
 import (

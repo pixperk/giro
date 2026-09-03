@@ -9,14 +9,14 @@ package storage
 //
 // Run them with a bounded iteration count, for example:
 //
-//	go test -bench . -benchtime 200x -run '^$' ./internal/storage/
+//	go test -bench . -benchtime 200x -run '^$' ./storage/
 
 import (
 	"fmt"
 	"sync/atomic"
 	"testing"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func transfer(from, to string, amount int64) ledger.Postings {

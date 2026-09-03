@@ -19,9 +19,9 @@ const stub = `-- %s
 
 `
 
-// New writes an empty migration into dir, named for the current utc time, and
+// Create writes an empty migration into dir, named for the current utc time, and
 // returns its path.
-func New(dir, name string) (string, error) {
+func Create(dir, name string) (string, error) {
 	return newAt(dir, name, time.Now())
 }
 

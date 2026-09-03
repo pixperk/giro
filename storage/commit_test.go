@@ -17,8 +17,8 @@ import (
 	"io/fs"
 
 	giro "github.com/pixperk/giro"
-	"github.com/pixperk/giro/internal/ledger"
-	"github.com/pixperk/giro/internal/migrate"
+	"github.com/pixperk/giro/ledger"
+	"github.com/pixperk/giro/migrate"
 )
 
 func n(i int64) *big.Int { return big.NewInt(i) }

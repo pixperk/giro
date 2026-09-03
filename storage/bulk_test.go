@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func item(from, to string, amount int64) BatchItem {

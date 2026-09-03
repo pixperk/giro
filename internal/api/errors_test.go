@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/storage"
 )
 
 // a server whose database is gone, so every handler takes its error path.

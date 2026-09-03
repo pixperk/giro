@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/pixperk/giro/internal/ledger"
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/ledger"
+	"github.com/pixperk/giro/storage"
 )
 
 // error mapping lives here rather than in each handler, so a new storage error

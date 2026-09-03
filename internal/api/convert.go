@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/pixperk/giro/internal/ledger"
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/ledger"
+	"github.com/pixperk/giro/storage"
 )
 
 // the wire types are generated from the contract and the domain types are

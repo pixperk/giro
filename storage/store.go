@@ -1,3 +1,9 @@
+// Package storage is the engine: the commit path, the hash chained log, and
+// the queries over both. It speaks postgres and knows nothing about http.
+//
+// A Store is scoped to one ledger. Commits to a single ledger serialise, so
+// ids stay gapless and the log chain has a single writer; commits to different
+// ledgers do not contend, which is where throughput comes from.
 package storage
 
 import (

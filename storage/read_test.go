@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func TestGetTransactionRoundTrip(t *testing.T) {

@@ -664,14 +664,18 @@ correctness test: the results were identical either way.
 ```
 api/openapi.yaml     the contract. written first, types generated from it
 cmd/giro/            cli: serve, migrate
-internal/ledger/     domain: postings, volumes, addresses, assets. no sql
-internal/storage/    the commit path, the log chain, queries. no http
+ledger/              domain: postings, volumes, addresses, assets. no sql
+storage/             the commit path, the log chain, queries. no http
+migrate/             migration runner and generator
 internal/api/        handlers, error mapping, the docs page
-internal/migrate/    migration runner and generator
 migrations/          numbered sql, embedded into the binary
 ```
 
-Inside `internal/storage`, one file per concern rather than one large one:
+`ledger`, `storage` and `migrate` are importable. `internal/api` is not: it is
+the server, not the library, and its shape is the contract in
+`api/openapi.yaml` rather than a Go surface anyone should depend on.
+
+Inside `storage`, one file per concern rather than one large one:
 
 ```
 store.go       the type, scoped to a ledger

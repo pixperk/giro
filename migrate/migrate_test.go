@@ -466,7 +466,7 @@ func TestStatusRejectsABadMigrationName(t *testing.T) {
 func TestNewWritesAStub(t *testing.T) {
 	dir := t.TempDir()
 
-	path, err := New(dir, "Add Metadata Tables!")
+	path, err := Create(dir, "Add Metadata Tables!")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestNewWritesAStub(t *testing.T) {
 func TestNewCreatesTheDirectory(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "does", "not", "exist")
 
-	path, err := New(base, "first")
+	path, err := Create(base, "first")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,8 +516,8 @@ func TestNewCreatesTheDirectory(t *testing.T) {
 func TestNewRejectsAnUnusableName(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"", "!!!", "   ", "___"} {
-		if _, err := New(dir, name); err == nil {
-			t.Errorf("New(%q) was accepted", name)
+		if _, err := Create(dir, name); err == nil {
+			t.Errorf("Create(%q) was accepted", name)
 		}
 	}
 }

@@ -8,7 +8,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/storage"
 )
 
 type Server struct {

@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	giro "github.com/pixperk/giro"
-	"github.com/pixperk/giro/internal/migrate"
-	"github.com/pixperk/giro/internal/storage"
+	"github.com/pixperk/giro/migrate"
+	"github.com/pixperk/giro/storage"
 )
 
 // tests drive the real server against real postgres rather than a mocked

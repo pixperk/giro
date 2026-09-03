@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pixperk/giro/internal/ledger"
+	"github.com/pixperk/giro/ledger"
 )
 
 func logTypes(t *testing.T, s *Store) []ledger.LogType {
