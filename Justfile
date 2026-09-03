@@ -51,6 +51,13 @@ serve:
 test:
     go test -race ./...
 
+# the suite as the restricted application role, which is how it runs in
+# production. everything that is an application path must pass. the six that
+# skip are the ones that have to damage the book to prove the damage is
+# noticed, and under this role they cannot stage their attack.
+test-restricted:
+    GIRO_TEST_ROLE=giro_app go test -race ./storage/
+
 # run tests matching a pattern, e.g. just test-one VolumeUpdates
 test-one PATTERN:
     go test -race -run {{ PATTERN }} -v ./...
@@ -65,7 +72,7 @@ cover-html:
     @go tool cover -html=coverage.out
 
 # everything ci runs, in the same order. run before committing
-check: fmt vet lint test
+check: fmt vet lint test test-restricted
 
 fmt:
     gofmt -l -w .
@@ -123,3 +130,10 @@ db-reset:
 [confirm("this drops every table in GIRO_TEST_DATABASE_URL. continue?")]
 db-reset-test:
     @psql "$GIRO_TEST_DATABASE_URL" -qc "drop schema public cascade; create schema public;"
+    @just db-sweep
+
+# every test makes its own schema and drops it on cleanup, but an interrupted
+# run leaves one behind and they accumulate invisibly. this sweeps them.
+db-sweep:
+    @psql "$GIRO_TEST_DATABASE_URL" -q -c "do \$\$ declare s record; begin       for s in select schema_name from information_schema.schemata       where schema_name like 't\\_%' or schema_name like 'api\\_%'       loop execute format('drop schema %I cascade', s.schema_name); end loop; end \$\$;" 2>/dev/null
+    @psql "$GIRO_TEST_DATABASE_URL" -qtc "select count(*) || ' test schemas left' from information_schema.schemata where schema_name like 't\\_%' or schema_name like 'api\\_%'"

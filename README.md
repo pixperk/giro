@@ -768,11 +768,45 @@ accounts, 10.7 ms at two hundred thousand. Throughput fell about 8% across
 ledgers and is unchanged sequentially. It grows with the book, and if that ever
 matters the answer is a maintained total per asset rather than an aggregate.
 
-**What this does not do.** A table's owner outranks its own triggers and can
-disable them. Until the application connects as a role that cannot, these are a
-large improvement rather than a proof. That is the next step.
+**What this does not do on its own.** A table's owner outranks its own triggers
+and can disable them with one statement. D35 is what closes that.
 
-### D35. Going below zero is a permission on a row, not a name
+### D35. The application connects as a role that cannot disable the guards
+
+`alter table logs disable trigger user` needs no privilege beyond owning the
+table. So every guard in D34 was advisory while the application owned what it
+was guarded by.
+
+Two roles. The migration tool owns everything and runs only during a rollout.
+`giro_app` gets `select`, `insert`, and `update` on named columns. No `delete`,
+no `truncate`, no `alter`, no ownership, and no write access to
+`schema_migrations`, so a serving process cannot claim it migrated something.
+
+The column scoping is the load bearing half. A table level `update` grant would
+re-open the money columns and leave the trigger as the only thing standing,
+which is exactly the hole an external audit found in the system this borrows
+from: the guard covered insert and delete, left update open, and ordinary table
+privileges were enough to write a spendable balance.
+
+The grants are the same allow list as the triggers, expressed in a second
+mechanism. The trigger says what a row may become; the grant says what the role
+may reach for. Neither is redundant, because they fail differently: a trigger
+can be switched off by the table's owner, and a missing grant cannot be given
+by the role that lacks it.
+
+**It is tested rather than asserted.** `just test-restricted` runs the whole
+suite as `giro_app`. Every application path passes, including reverts,
+backdating, metadata and all four verifiers. Six tests skip, and they are
+exactly the six that have to damage the book to prove the damage is noticed.
+Under this role they cannot stage their attack.
+
+Two things worth knowing. The role is `nologin`: nothing authenticates as it
+directly, so the credential story stays out of the schema. And a missing grant
+surfaces as `relation does not exist` rather than a permission error when the
+schema `usage` grant is the one missing, which reads like a missing table and
+is not.
+
+### D36. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

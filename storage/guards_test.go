@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -33,6 +34,19 @@ func refused(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want string,
 	if !errors.As(err, &pg) {
 		t.Fatalf("err = %v, want a postgres error", err)
 	}
+
+	// under the restricted application role the privilege check fires before
+	// the trigger ever runs, so the statement is refused a layer earlier. that
+	// is defence in depth working rather than a different outcome, and it is
+	// why the two mechanisms are both worth having: one says what a row may
+	// become, the other says what the role may reach for.
+	if os.Getenv("GIRO_TEST_ROLE") != "" {
+		if pg.Code != "23001" && pg.Code != "42501" {
+			t.Fatalf("sqlstate = %s (%s), want a guard (23001) or a privilege (42501)", pg.Code, pg.Message)
+		}
+		return
+	}
+
 	if pg.Code != "23001" {
 		t.Fatalf("sqlstate = %s (%s), want 23001 restrict_violation: the statement was "+
 			"refused by something other than our guard", pg.Code, pg.Message)

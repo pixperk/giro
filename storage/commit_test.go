@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"io/fs"
@@ -72,6 +73,28 @@ func testStore(t testing.TB) (context.Context, *Store, *pgxpool.Pool) {
 
 	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('main')"); err != nil {
 		t.Fatal(err)
+	}
+
+	// GIRO_TEST_ROLE=giro_app runs the whole suite as the restricted
+	// application role, on a second pool so that the schema and the migrations
+	// are still created by the owner, as they are in a real deployment.
+	//
+	// Every application path must still pass. The tests that fail are the ones
+	// that have to damage the book to prove the damage gets noticed, and under
+	// this role they cannot stage their attack. That is the result rather than
+	// a problem to fix.
+	if role := os.Getenv("GIRO_TEST_ROLE"); role != "" {
+		owner := pool
+		t.Cleanup(owner.Close)
+
+		restricted := cfg.Copy()
+		restricted.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, err := conn.Exec(ctx, "set role "+role)
+			return err
+		}
+		if pool, err = pgxpool.NewWithConfig(ctx, restricted); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	t.Cleanup(func() {
@@ -779,6 +802,11 @@ func TestDryRunDoesNotClaimAnIdempotencyKey(t *testing.T) {
 // the reason the role split is worth doing.
 func withoutGuards(t testing.TB, ctx context.Context, pool *pgxpool.Pool, tables ...string) {
 	t.Helper()
+	if role := os.Getenv("GIRO_TEST_ROLE"); role != "" {
+		t.Skipf("%s cannot lift the guards, which is the point: this test has to "+
+			"damage the book to prove the damage is noticed, and under the "+
+			"application role it cannot stage its attack", role)
+	}
 	for _, table := range tables {
 		if _, err := pool.Exec(ctx, "alter table "+table+" disable trigger user"); err != nil {
 			t.Fatalf("lifting guards on %s: %v", table, err)

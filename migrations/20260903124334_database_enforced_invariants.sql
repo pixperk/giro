@@ -13,10 +13,10 @@
 -- these move the rules into the database, where they apply to every writer
 -- including the ones nobody anticipated.
 --
--- what this does not do is make the book unforgeable. the role that owns these
--- tables outranks their triggers and can switch them off, so the guarantee is
--- bounded by the role the application connects as. that is the next migration,
--- and until it lands these are a large improvement rather than a proof.
+-- what this does not do on its own is make the book unforgeable. the role that
+-- owns these tables outranks their triggers and can switch them off, so the
+-- guarantee is bounded by the role the application connects as. the next
+-- migration is what closes that, by giving the application a role that cannot.
 
 -- ---------------------------------------------------------------------------
 -- append only
