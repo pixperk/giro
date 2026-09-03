@@ -218,18 +218,23 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 	return transaction, alloc, nil
 }
 
-// checkBalances rejects the transaction if any account other than world would
-// end below zero.
+// checkBalances rejects the transaction if any account not permitted to go
+// negative would end below zero.
+//
+// the permission is read from the row the caller already locked, so it cannot
+// have changed since. world carries it from creation; anything else carries it
+// because someone set it deliberately, which is how a cost account is told
+// apart from a client account about to be drained.
 //
 // the check is on the final state, so an account may pass through zero within
 // a transaction. it uses the current balance and never an effective date
 // balance: the money either exists now or it does not.
-func checkBalances(before map[key]ledger.Volumes, updates []ledger.VolumeUpdate) error {
+func checkBalances(before map[key]locked, updates []ledger.VolumeUpdate) error {
 	for _, u := range updates {
-		if u.Account == ledger.WorldAccount {
+		v := before[key{u.Account, u.Asset}]
+		if v.allowNegative {
 			continue
 		}
-		v := before[key{u.Account, u.Asset}]
 		input := new(big.Int).Add(v.Input, u.Input)
 		output := new(big.Int).Add(v.Output, u.Output)
 
@@ -246,7 +251,7 @@ func checkBalances(before map[key]ledger.Volumes, updates []ledger.VolumeUpdate)
 }
 
 // the final state of every touched account, frozen at commit.
-func postCommitVolumes(before map[key]ledger.Volumes, updates []ledger.VolumeUpdate) ledger.PostCommitVolumes {
+func postCommitVolumes(before map[key]locked, updates []ledger.VolumeUpdate) ledger.PostCommitVolumes {
 	out := ledger.PostCommitVolumes{}
 	for _, u := range updates {
 		v := before[key{u.Account, u.Asset}]

@@ -32,13 +32,13 @@ import (
 // balance as of this transaction's timestamp rather than from the current one,
 // and every move that already sits later in effective order is shifted by this
 // transaction's delta.
-func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transaction, before map[key]ledger.Volumes, updates []ledger.VolumeUpdate) error {
+func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transaction, before map[key]locked, updates []ledger.VolumeUpdate) error {
 	effectiveBefore, err := s.effectiveVolumesAt(ctx, tx, updates, t.Timestamp)
 	if err != nil {
 		return err
 	}
 
-	running := copyVolumes(before)
+	running := copyLocked(before)
 	effective := copyVolumes(effectiveBefore)
 
 	batch := &pgx.Batch{}
@@ -161,6 +161,20 @@ func (s *Store) shiftLaterEffectiveVolumes(ctx context.Context, tx pgx.Tx, updat
 		}
 	}
 	return results.Close()
+}
+
+// the same copy, dropping the permission: the running accumulation is about
+// what the balances were, and nothing downstream of the guard cares who was
+// allowed to go negative.
+func copyLocked(in map[key]locked) map[key]ledger.Volumes {
+	out := make(map[key]ledger.Volumes, len(in))
+	for k, v := range in {
+		out[k] = ledger.Volumes{
+			Input:  new(big.Int).Set(v.Input),
+			Output: new(big.Int).Set(v.Output),
+		}
+	}
+	return out
 }
 
 func copyVolumes(in map[key]ledger.Volumes) map[key]ledger.Volumes {

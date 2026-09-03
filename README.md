@@ -26,8 +26,9 @@ commit or none do. That is the only write operation in the system.
 Four ideas carry the rest.
 
 **Money is conserved.** Value enters from a special account called `world` and
-leaves to it. `world` is the only account allowed a negative balance. For any
-asset, every balance summed together always equals exactly zero.
+leaves to it. `world` is allowed a negative balance, and by default it is the
+only one. For any asset, every balance summed together always equals exactly
+zero.
 
 ```mermaid
 flowchart LR

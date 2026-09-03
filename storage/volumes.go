@@ -17,6 +17,19 @@ type key struct {
 	asset   string
 }
 
+// one accounts_volumes row as it stood when the commit path locked it: the
+// volumes, and whether this account is permitted to end below zero in this
+// asset.
+//
+// the flag travels with the volumes because it is read from the same row under
+// the same FOR UPDATE. reading it separately would mean a second statement
+// that could see a value committed after the lock was taken, which is the one
+// thing the lock exists to prevent.
+type locked struct {
+	ledger.Volumes
+	allowNegative bool
+}
+
 // pgx has no native mapping between numeric and *big.Int. pgtype.Numeric
 // carries an unscaled *big.Int plus an exponent, so with Exp 0 it is exactly
 // an integer and round trips without going near a float.
@@ -53,7 +66,7 @@ func bigInt(n pgtype.Numeric) (*big.Int, error) {
 // whole deadlock defence, so it is preserved here and asserted again with an
 // ORDER BY, because the planner is not obliged to lock in the order rows were
 // listed.
-func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.VolumeUpdate) (map[key]ledger.Volumes, error) {
+func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.VolumeUpdate) (map[key]locked, error) {
 	addresses, assets := pairs(updates)
 
 	// you cannot lock a row that does not exist, and FOR UPDATE on a missing
@@ -63,16 +76,20 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 	//
 	// under a race, ON CONFLICT DO NOTHING blocks on the other transaction's
 	// uncommitted row rather than skipping it, so the two serialise here.
+	//
+	// world is created already permitted to go negative. it is the account the
+	// whole model leans on, so it is the built-in instance of the permission
+	// rather than a name the balance guard has to know about.
 	if _, err := tx.Exec(ctx, `
-		insert into accounts_volumes (ledger, address, asset)
-		select $1, a, s from unnest($2::text[], $3::text[]) as t(a, s)
+		insert into accounts_volumes (ledger, address, asset, allow_negative)
+		select $1, a, s, a = $4 from unnest($2::text[], $3::text[]) as t(a, s)
 		on conflict do nothing`,
-		s.ledger, addresses, assets); err != nil {
+		s.ledger, addresses, assets, ledger.WorldAccount); err != nil {
 		return nil, fmt.Errorf("materialise volume rows: %w", err)
 	}
 
 	rows, err := tx.Query(ctx, `
-		select address, asset, input, output
+		select address, asset, input, output, allow_negative
 		from accounts_volumes
 		where ledger = $1
 		  and (address, asset) in (select * from unnest($2::text[], $3::text[]))
@@ -84,11 +101,12 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 	}
 	defer rows.Close()
 
-	current := make(map[key]ledger.Volumes, len(updates))
+	current := make(map[key]locked, len(updates))
 	for rows.Next() {
 		var k key
 		var in, out pgtype.Numeric
-		if err := rows.Scan(&k.account, &k.asset, &in, &out); err != nil {
+		var allowNegative bool
+		if err := rows.Scan(&k.account, &k.asset, &in, &out, &allowNegative); err != nil {
 			return nil, err
 		}
 		input, err := bigInt(in)
@@ -99,7 +117,10 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 		if err != nil {
 			return nil, err
 		}
-		current[k] = ledger.Volumes{Input: input, Output: output}
+		current[k] = locked{
+			Volumes:       ledger.Volumes{Input: input, Output: output},
+			allowNegative: allowNegative,
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -107,11 +128,15 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 
 	// anything the select did not return is a row this transaction just
 	// created, which is invisible to its own snapshot. it is locked either
-	// way, by virtue of being ours and uncommitted.
+	// way, by virtue of being ours and uncommitted. it was created by the
+	// insert above, so its permission is known without reading it back.
 	for _, u := range updates {
 		k := key{u.Account, u.Asset}
 		if _, ok := current[k]; !ok {
-			current[k] = ledger.NewVolumes()
+			current[k] = locked{
+				Volumes:       ledger.NewVolumes(),
+				allowNegative: u.Account == ledger.WorldAccount,
+			}
 		}
 	}
 
