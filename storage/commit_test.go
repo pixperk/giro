@@ -24,6 +24,20 @@ import (
 
 func n(i int64) *big.Int { return big.NewInt(i) }
 
+var testAssets = []string{"USD/2", "EUR/2", "USDT/6", "USDC/6", "BTC/8", "TOKEN/18", "POINTS", "A", "B", "C"}
+
+// the registry is per ledger, so a test making a second one declares its
+// assets too. that separation is deliberate: two entities need not deal in the
+// same currencies.
+func registerTestAssets(t testing.TB, ctx context.Context, pool *pgxpool.Pool, name string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		insert into assets (ledger, asset)
+		select $1, a from unnest($2::text[]) as a`, name, testAssets); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testURL() string {
 	if u := os.Getenv("GIRO_TEST_DATABASE_URL"); u != "" {
 		return u
@@ -74,6 +88,11 @@ func testStore(t testing.TB) (context.Context, *Store, *pgxpool.Pool) {
 	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('main')"); err != nil {
 		t.Fatal(err)
 	}
+
+	// assets are declared rather than discovered, so the suite declares the
+	// ones it uses. one scale per code, so a test needing a different scale of
+	// something already here has to say so deliberately, which is the point.
+	registerTestAssets(t, ctx, pool, "main")
 
 	// GIRO_TEST_ROLE=giro_app runs the whole suite as the restricted
 	// application role, on a second pool so that the schema and the migrations

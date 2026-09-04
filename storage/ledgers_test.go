@@ -43,6 +43,7 @@ func TestCreateLedgerIsScoped(t *testing.T) {
 	if _, err := other.CreateLedger(ctx); err != nil {
 		t.Fatal(err)
 	}
+	registerTestAssets(t, ctx, pool, "second")
 
 	// each keeps its own counters, so both start at id 1
 	a := New(pool, "main")

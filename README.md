@@ -83,7 +83,7 @@ just serve
 owns the tables; serving should not have it, because a table's owner can switch
 off the triggers that guard it. `just db-app-role` creates a local role with no
 privileges of its own that is a member of `giro_app`, and pointing
-`DATABASE_URL` at it is what makes the guarantees in D34 and D35 real rather
+`DATABASE_URL` at it is what makes the guarantees in D35 and D36 real rather
 than available.
 
 `just privileges` prints what the serving connection can actually do, which is
@@ -114,6 +114,8 @@ one, so a populated demo can be linked to.
 ```
 POST   /v1/ledgers/{ledger}                          create a ledger
 GET    /v1/ledgers/{ledger}
+POST   /v1/ledgers/{ledger}/assets                   register an asset, required before use
+GET    /v1/ledgers/{ledger}/assets
 POST   /v1/ledgers/{ledger}/transactions             commit, Idempotency-Key header, ?dryRun=true
 POST   /v1/ledgers/{ledger}/transactions/bulk        commit several as one event
 GET    /v1/ledgers/{ledger}/transactions             list, cursor paginated
@@ -191,7 +193,7 @@ by every commit, and three others change in narrow, named ways: a transaction
 is stamped when reverted and carries metadata, a move has its effective volumes
 rewritten when something lands behind it, and an account's metadata and first
 usage move. Nothing that was *recorded* ever changes, and the database enforces
-exactly that column by column (D34).
+exactly that column by column (D35).
 
 The same facts live at three grains, and each answers a different question.
 
@@ -738,7 +740,49 @@ rollout, and nothing else would mention it.
 The check takes no lock and applies nothing. A process that serves traffic
 should not be able to change the schema.
 
-### D34. The invariants are enforced in the database, not only in Go
+### D34. Assets are declared, accounts are not
+
+An account exists because a posting named it (D2). An asset has to be
+registered first. Those look inconsistent and are not, and the difference is
+the point.
+
+An asset carries its own scale, so `USD/2` and `USD/6` are both well formed,
+are different assets, and never mix. Without a registry a mistyped scale is not
+an error, it is a second currency that accumulates its own balances, and
+**conservation still passes** because each pile balances on its own. Nothing
+anywhere would raise a word.
+
+There are a handful of assets in a system and thousands of accounts, so
+requiring the handful to be declared costs almost nothing and closes a failure
+mode that is otherwise silent and permanent.
+
+**One scale per currency, per ledger.** Registering `USD/2` makes `USD/6` and
+bare `USD` refusable. It is expressed as a unique index on the code rather than
+by storing a scale column, so the decision that no scale is stored anywhere
+(D1) survives intact: the scale still lives in the asset identifier and the
+engine still never branches on it. The index only says a ledger cannot hold two
+spellings of one currency.
+
+**Registration is permanent**, and the reason is worth stating. Re-registering
+a currency at a different scale would reinterpret every amount already recorded
+in it: 10000 of `USD/2` is a hundred dollars and the same number in `USD/6` is
+a hundredth of one. That is not a correction, it is a silent restatement of the
+whole book.
+
+**Enforced by foreign key from `accounts_volumes` and `moves`,** so it holds
+for raw SQL too. There is deliberately no foreign key to `ledgers` (D14),
+because the commit path takes `FOR UPDATE` on that row and two transactions
+each holding a shared lock and each waiting to upgrade is a deadlock sorting
+cannot prevent. `assets` is safe from that because nothing ever updates a row
+in it: no `FOR UPDATE` is taken, so there is no upgrade and no cycle.
+
+The Go check exists for the error rather than the enforcement. A constraint
+violation says `accounts_volumes_asset_registered`; a caller who mistyped a
+scale needs to be told that `USD/2` exists and `USD/6` does not.
+
+**Cost:** roughly 4% on the hot-account path, within noise elsewhere.
+
+### D35. The invariants are enforced in the database, not only in Go
 
 Every rule used to live in Go, which holds exactly as long as the application
 is the only writer. It is not, and will not be: an engineer in psql, a backfill
@@ -798,9 +842,9 @@ ledgers and is unchanged sequentially. It grows with the book, and if that ever
 matters the answer is a maintained total per asset rather than an aggregate.
 
 **What this does not do on its own.** A table's owner outranks its own triggers
-and can disable them with one statement. D35 is what closes that.
+and can disable them with one statement. D36 is what closes that.
 
-### D35. The application connects as a role that cannot disable the guards
+### D36. The application connects as a role that cannot disable the guards
 
 `alter table logs disable trigger user` needs no privilege beyond owning the
 table. So every guard in D34 was advisory while the application owned what it
@@ -835,7 +879,7 @@ surfaces as `relation does not exist` rather than a permission error when the
 schema `usage` grant is the one missing, which reads like a missing table and
 is not.
 
-### D36. Going below zero is a permission on a row, not a name
+### D37. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

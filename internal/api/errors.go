@@ -49,6 +49,12 @@ func classify(err error) (status int, code ErrorCode, message string) {
 		errors.Is(err, storage.ErrAlreadyReverted):
 		return http.StatusConflict, CONFLICT, err.Error()
 
+	// 400 rather than 422: the caller can fix this by registering the asset,
+	// or more often by correcting a scale it mistyped. 422 is for a request
+	// that is well formed and cannot be applied to the world as it stands.
+	case errors.Is(err, storage.ErrUnknownAsset):
+		return http.StatusBadRequest, VALIDATION, err.Error()
+
 	case errors.Is(err, storage.ErrNoPostings), errors.Is(err, storage.ErrInvalidCursor),
 		errors.Is(err, storage.ErrEmptyMetadata),
 		errors.Is(err, ledger.ErrEmptyMetadataKey),

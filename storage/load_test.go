@@ -105,6 +105,7 @@ func BenchmarkCommitAcrossLedgers(b *testing.B) {
 	stores := make([]*Store, ledgers)
 	for i := range stores {
 		name := fmt.Sprintf("l%d", i)
+		registerTestAssets(b, ctx, pool, name)
 		if _, err := pool.Exec(ctx, "insert into ledgers (name) values ($1)", name); err != nil {
 			b.Fatal(err)
 		}

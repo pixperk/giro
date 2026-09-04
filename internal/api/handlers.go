@@ -516,3 +516,37 @@ func (s *Server) commitBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, resp)
 }
+
+func (s *Server) registerAsset(w http.ResponseWriter, r *http.Request) {
+	var body RegisterAssetJSONBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	store := s.store(r.PathValue("ledger"))
+	if err := store.RegisterAsset(r.Context(), ledger.Asset(body.Asset)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	// the whole list rather than the one just added, because the useful
+	// question after registering is what this ledger now handles
+	assets, err := store.Assets(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, assets)
+}
+
+func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
+	assets, err := s.store(r.PathValue("ledger")).Assets(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if assets == nil {
+		assets = []ledger.Asset{}
+	}
+	writeJSON(w, http.StatusOK, assets)
+}

@@ -56,6 +56,9 @@ func (s *Store) CommitBatch(ctx context.Context, items []BatchItem, opts CommitO
 		if j, err := item.Postings.Validate(); err != nil {
 			return nil, &BatchItemError{Index: i, Err: &PostingError{Index: j, Err: err}}
 		}
+		if err := s.checkAssets(ctx, item.Postings); err != nil {
+			return nil, &BatchItemError{Index: i, Err: err}
+		}
 	}
 
 	ikHash, err := batchIdempotencyHash(items, opts)

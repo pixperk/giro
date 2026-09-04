@@ -30,6 +30,8 @@ func NewServer(store func(ledger string) *storage.Store) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}", s.createLedger)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}", s.getLedger)
+	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/assets", s.registerAsset)
+	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/assets", s.listAssets)
 
 	s.mux.HandleFunc("POST /v1/ledgers/{ledger}/transactions", s.createTransaction)
 	s.mux.HandleFunc("GET /v1/ledgers/{ledger}/transactions", s.listTransactions)

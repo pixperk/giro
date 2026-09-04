@@ -122,11 +122,22 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 }
 
 // creates a ledger and returns its base path.
+// the assets the suite posts in, registered over the api rather than inserted
+// behind it, so this exercises the endpoint a real caller has to use before it
+// can post anything at all.
+var testAssets = []string{"USD/2", "EUR/2", "USDT/6", "BTC/8", "TOKEN/18"}
+
 func newLedger(t *testing.T, s *Server, name string) string {
 	t.Helper()
 	base := "/v1/ledgers/" + name
 	if rec := do(t, s, http.MethodPost, base, nil); rec.Code != http.StatusCreated {
 		t.Fatalf("creating ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, asset := range testAssets {
+		if rec := do(t, s, http.MethodPost, base+"/assets",
+			map[string]any{"asset": asset}); rec.Code != http.StatusCreated {
+			t.Fatalf("registering %s: %d %s", asset, rec.Code, rec.Body.String())
+		}
 	}
 	return base
 }

@@ -27,6 +27,7 @@ func twoLedgers(t *testing.T) (context.Context, *Store, *Store, *pgxpool.Pool) {
 	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('theirs')"); err != nil {
 		t.Fatal(err)
 	}
+	registerTestAssets(t, ctx, pool, "theirs")
 	theirs := New(pool, "theirs")
 
 	// identical addresses in both ledgers, different amounts, so a leak is

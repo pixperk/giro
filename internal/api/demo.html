@@ -322,7 +322,7 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
       <div class="pane">
         <p class="pane-title">Actions</p>
         <div class="actions">
-          <button id="setup">Create a ledger<span class="hint">POST /v1/ledgers/{name}</span></button>
+          <button id="setup">Create a ledger<span class="hint">POST /v1/ledgers/{name}, then /assets</span></button>
           <button data-post='{"postings":[{"source":"world","destination":"users:alice","asset":"USD/2","amount":50000}]}'>
             Fund Alice with $500<span class="hint">money enters from world</span></button>
           <button data-post='{"postings":[{"source":"users:alice","destination":"users:bob","asset":"USD/2","amount":12500},{"source":"users:alice","destination":"fees:platform","asset":"USD/2","amount":500}]}'>
@@ -540,10 +540,15 @@ function adopt(name) {
 $("setup").onclick = async () => {
   ledger = "demo-" + Math.random().toString(36).slice(2, 7);
   const r = await call("POST", "/v1/ledgers/" + ledger);
-  if (r && r.ok) {
-    history.replaceState(null, "", "?ledger=" + ledger);
-    await adopt(ledger);
-  }
+  if (!r || !r.ok) return;
+
+  // a ledger declares the assets it may handle before anything can be posted
+  // in them. USD/2 and USD/6 are both well formed and never mix, so a mistyped
+  // scale would otherwise be a second currency rather than an error.
+  await call("POST", "/v1/ledgers/" + ledger + "/assets", { asset: "USD/2" });
+
+  history.replaceState(null, "", "?ledger=" + ledger);
+  await adopt(ledger);
 };
 
 async function post(body) {

@@ -44,6 +44,58 @@ tags:
   - name: logs
 
 paths:
+  /v1/ledgers/{ledger}/assets:
+    parameters:
+      - $ref: "#/components/parameters/LedgerPath"
+    get:
+      tags: [ledgers]
+      summary: List the assets this ledger may handle
+      operationId: listAssets
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string, example: "USD/2" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      tags: [ledgers]
+      summary: Register an asset
+      description: |
+        Declares an asset this ledger may handle. A posting naming an
+        unregistered asset is refused.
+
+        Permanent, and one scale per currency: registering `USD/2` makes
+        `USD/6` and bare `USD` refusable. That is the point of the registry
+        rather than a limitation of it, because an asset string carries its own
+        scale and two spellings of one currency would otherwise be two
+        currencies that never mix and never error.
+
+        Registering the same asset twice is a no-op, so a startup routine
+        declaring its chart of accounts can run on every boot.
+      operationId: registerAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset]
+              properties:
+                asset: { type: string, example: "USD/2" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string, example: "USD/2" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
+
   /v1/ledgers/{ledger}:
     parameters:
       - $ref: "#/components/parameters/LedgerPath"

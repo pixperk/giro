@@ -59,6 +59,12 @@ func (s *Store) CommitTransaction(ctx context.Context, p ledger.Postings, opts C
 	if i, err := p.Validate(); err != nil {
 		return nil, &PostingError{Index: i, Err: err}
 	}
+	// before the retry loop: an unregistered asset is not a contention
+	// problem, and retrying it ten times with backoff would only make the
+	// answer slower.
+	if err := s.checkAssets(ctx, p); err != nil {
+		return nil, err
+	}
 
 	ikHash, err := idempotencyHash(p, opts)
 	if err != nil {

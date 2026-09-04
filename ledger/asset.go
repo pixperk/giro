@@ -38,3 +38,13 @@ func (a Asset) Scale() (scale int, ok bool) {
 }
 
 func (a Asset) String() string { return string(a) }
+
+// Code is the asset without its scale: "USD/2" is "USD", "POINTS" is "POINTS".
+//
+// A ledger may register only one scale per code, so this is the identity the
+// registry is unique on. It is not something the engine branches on: two
+// assets sharing a code are still different assets and never mix.
+func (a Asset) Code() string {
+	code, _, _ := strings.Cut(string(a), "/")
+	return code
+}

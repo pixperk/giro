@@ -383,6 +383,12 @@ type ListMovesParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// RegisterAssetJSONBody defines parameters for RegisterAsset.
+type RegisterAssetJSONBody struct {
+	// Asset Example: USD/2
+	Asset string `json:"asset"`
+}
+
 // AggregateBalancesParams defines parameters for AggregateBalances.
 type AggregateBalancesParams struct {
 	// Prefix For example `users:`. Matches on segment boundaries, so `users:` never matches `fees:users:refunds`.
@@ -452,6 +458,9 @@ type CommitBatchParams struct {
 
 // SetAccountMetadataJSONRequestBody defines body for SetAccountMetadata for application/json ContentType.
 type SetAccountMetadataJSONRequestBody = Metadata
+
+// RegisterAssetJSONRequestBody defines body for RegisterAsset for application/json ContentType.
+type RegisterAssetJSONRequestBody RegisterAssetJSONBody
 
 // CreateTransactionJSONRequestBody defines body for CreateTransaction for application/json ContentType.
 type CreateTransactionJSONRequestBody = CreateTransactionRequest
