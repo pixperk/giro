@@ -117,11 +117,19 @@ giro verify --stale-after=4h      # and money that has stopped moving
 giro verify --last                # when each check last ran
 ```
 
-Exits 1 on a finding, so a scheduler notices. Alert on two conditions rather
-than one: findings above zero, and the absence of a recent run. A detector that
-stopped running looks exactly like a book with nothing wrong, and every check
-reports what it examined so that "looked and found nothing" is distinguishable
-from "did not look".
+```bash
+giro verify --last --max-age=25h  # fail if anything has stopped running
+giro verify --json                # for a monitor rather than a person
+```
+
+Exits 1 on a finding, so a scheduler notices. **Alert on two conditions rather
+than one:** findings above zero, and the absence of a recent run. A detector
+that stopped running looks exactly like a book with nothing wrong, which is why
+`--max-age` is a check rather than a report and why every check reports what it
+examined.
+
+[deploy/](deploy/) has cron, systemd and Kubernetes versions of both, and a
+table of what to page on.
 
 ### The api
 

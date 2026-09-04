@@ -158,10 +158,11 @@ db-app-role:
 verify:
     @go run ./cmd/giro verify --stale-after=4h
 
-# when each check last ran. the other half of alerting: a detector that
-# stopped running looks exactly like a book with nothing wrong.
-verify-last:
-    @go run ./cmd/giro verify --last
+# when each check last ran, and whether anything has stopped. the other half of
+# alerting: a detector that stopped running looks exactly like a book with
+# nothing wrong. see deploy/README.md for scheduling it.
+verify-last MAXAGE="":
+    @go run ./cmd/giro verify --last {{ if MAXAGE != "" { "--max-age=" + MAXAGE } else { "" } }}
 
 # what the serving connection can actually do, which is the only version of
 # this that counts

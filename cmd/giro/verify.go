@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +27,8 @@ const verifyUsage = `usage:
   --boundary=PREFIX            which accounts face outward, default external:
   --record=false               do not write a verification_runs row
   --last                       report when each check last ran, and exit
+  --max-age=DURATION           with --last, fail if any check has not run since
+  --json                       machine readable output
 
 exits 1 if any check reports a finding, so a scheduler notices.
 reads DATABASE_URL from the environment.
@@ -41,6 +45,8 @@ func verifyCommand(ctx context.Context, args []string) error {
 	boundary := fs.String("boundary", "", "")
 	record := fs.Bool("record", true, "")
 	last := fs.Bool("last", false, "")
+	maxAge := fs.Duration("max-age", 0, "")
+	asJSON := fs.Bool("json", false, "")
 	if err := fs.Parse(args); err != nil {
 		return usageErr{verifyUsage}
 	}
@@ -67,7 +73,7 @@ func verifyCommand(ctx context.Context, args []string) error {
 	}
 
 	if *last {
-		return reportLastRun(ctx, pool, names)
+		return reportLastRun(ctx, pool, names, *maxAge, *asJSON)
 	}
 
 	var findings int
@@ -84,7 +90,11 @@ func verifyCommand(ctx context.Context, args []string) error {
 		})
 		// print what did run before returning, so a failure to record does not
 		// swallow the findings that were the point of running
-		findings += report(name, results)
+		if *asJSON {
+			findings += reportJSON(name, results)
+		} else {
+			findings += report(name, results)
+		}
 		if err != nil {
 			return err
 		}
@@ -117,23 +127,105 @@ func report(name string, results []storage.CheckResult) (findings int) {
 // the other half of alerting. findings above zero is the condition everyone
 // writes; the absence of a run is the one that hides a real problem for as
 // long as nobody notices the scheduler died.
-func reportLastRun(ctx context.Context, pool *pgxpool.Pool, names []string) error {
+//
+// With --max-age this is not a report but a check, and a monitor can treat it
+// exactly like the findings one: run it, look at the exit code. That is the
+// whole reason it takes a duration rather than leaving an operator to compare
+// timestamps by eye, which is a thing nobody does at three in the morning.
+func reportLastRun(ctx context.Context, pool *pgxpool.Pool, names []string, maxAge time.Duration, asJSON bool) error {
+	type staleness struct {
+		Ledger string    `json:"ledger"`
+		Check  string    `json:"check"`
+		LastAt time.Time `json:"lastAt"`
+		AgeSec float64   `json:"ageSeconds"`
+		Stale  bool      `json:"stale"`
+	}
+
+	var out []staleness
+	var stale int
+
 	for _, name := range names {
 		seen, err := storage.New(pool, name).LastVerified(ctx)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", name)
+		if !asJSON {
+			fmt.Printf("%s\n", name)
+		}
 		if len(seen) == 0 {
-			fmt.Println("  never run")
+			if !asJSON {
+				fmt.Println("  never run")
+			}
+			// never run is only a failure when somebody asked for a bound.
+			// otherwise it is a fresh ledger, which is not a problem.
+			if maxAge > 0 {
+				stale++
+				out = append(out, staleness{Ledger: name, Check: "*", Stale: true})
+			}
 			continue
 		}
-		for check, at := range seen {
-			fmt.Printf("  %-20s %s  (%s ago)\n",
-				check, at.Format(time.RFC3339), time.Since(at).Round(time.Second))
+		for _, check := range sortedKeys(seen) {
+			at := seen[check]
+			age := time.Since(at)
+			isStale := maxAge > 0 && age > maxAge
+			if isStale {
+				stale++
+			}
+			out = append(out, staleness{name, check, at, age.Seconds(), isStale})
+			if !asJSON {
+				mark := "  "
+				if isStale {
+					mark = "! "
+				}
+				fmt.Printf("%s%-20s %s  (%s ago)\n",
+					mark, check, at.Format(time.RFC3339), age.Round(time.Second))
+			}
 		}
 	}
+
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
+			return err
+		}
+	}
+	if stale > 0 {
+		return fmt.Errorf("%d check(s) have not run in %s", stale, maxAge)
+	}
 	return nil
+}
+
+// results as json, for a monitor rather than a person.
+func reportJSON(name string, results []storage.CheckResult) (findings int) {
+	type line struct {
+		Ledger  string `json:"ledger"`
+		Check   string `json:"check"`
+		OK      bool   `json:"ok"`
+		Checked int    `json:"checked"`
+		TookMs  int64  `json:"tookMs"`
+		Detail  string `json:"detail,omitempty"`
+	}
+	out := make([]line, len(results))
+	for i, r := range results {
+		out[i] = line{name, r.Name, r.OK, r.Checked, r.Took.Milliseconds(), r.Detail}
+		if !r.OK {
+			findings++
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+	return findings
+}
+
+func sortedKeys(m map[string]time.Time) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Checks contributed by layers above the engine.
