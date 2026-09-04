@@ -1,10 +1,104 @@
 # Reconciling giro
 
+*Complete type and function reference: [API.md](API.md).*
+
 Every check inside a ledger proves the book is consistent with itself. None of
 them can tell you the money is actually in the bank.
 
 giro records what you believe happened. Reconciliation checks that against what
 everyone else says happened.
+
+---
+
+## Quickstart
+
+Five minutes, one counterparty. Everything below compiles as part of the test
+suite ([example_test.go](example_test.go)), so it cannot drift from the API.
+
+### 1. Write the adapter
+
+The only thing you implement. It calls somebody's API and maps the answer onto
+`Record` — no database, no accounts.
+
+```go
+type bankStatement struct{}
+
+func (bankStatement) ID() string   { return "infinitus" }
+func (bankStatement) Name() string { return "Infinitus Pay" }
+
+func (bankStatement) Fetch(ctx context.Context, since time.Time) ([]recon.Record, error) {
+	rows, err := myBankClient.Statement(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]recon.Record, len(rows))
+	for i, r := range rows {
+		out[i] = recon.Record{
+			ID:        r.StatementID,   // their line id
+			Reference: r.WireRef,       // the match key
+			Asset:     "USD/2",
+			Amount:    big.NewInt(r.Cents), // positive magnitude
+			Direction: recon.Out,
+		}
+	}
+	return out, nil
+}
+```
+
+### 2. Set it up once
+
+```go
+s := storage.New(pool, "main")
+source := bankStatement{}
+
+s.RegisterAsset(ctx, "USD/2")
+recon.Register(ctx, pool, "main", source)
+
+// the boundary account standing for the bank. permitted a negative balance
+// because it is the outside world's side of the book.
+const atBank = ledger.Address("external:bank:infinitus:USD")
+s.SetAllowNegative(ctx, atBank, "USD/2", true)
+```
+
+Both registrations are idempotent, so this can run on every boot.
+
+### 3. Stamp payments with the reference the bank will use
+
+```go
+s.CommitTransaction(ctx, ledger.Postings{
+	{Source: "client:acme", Destination: atBank, Asset: "USD/2", Amount: big.NewInt(99_725_00)},
+}, storage.CommitOptions{
+	Metadata: ledger.Metadata{recon.ExternalRefKey: "WIRE-2026-0142"},
+})
+```
+
+This is the one thing you have to remember to do. Without it a payment has
+nothing to match against, and every line the bank sends comes back as
+`reference_not_found`.
+
+### 4. Reconcile, on a schedule
+
+```go
+recon.Pull(ctx, pool, "main", source, time.Now().Add(-time.Hour))
+sum, err := recon.Match(ctx, pool, "main", recon.Config{})
+
+// sum.Matched   1
+// sum.Variance  0
+// sum.Unmatched map[]
+```
+
+Fetching the last hour every ten minutes is correct — re-ingesting a line does
+nothing, so overlapping windows are the safe way to page a statement rather
+than something to avoid.
+
+### 5. Alert on it
+
+```
+giro verify --recon-after=4h
+```
+
+Exits non-zero if anything has been unmatched longer than the grace period.
+Alert on that **and** on the absence of a recent run.
 
 ---
 
