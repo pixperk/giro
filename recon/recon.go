@@ -149,17 +149,3 @@ type Config struct {
 	// is a penny out is telling you something.
 	Tolerance *big.Int
 }
-
-func (c Config) boundary() Boundary {
-	if c.Boundary == nil {
-		return Prefix(DefaultBoundaryPrefix)
-	}
-	return c.Boundary
-}
-
-func (c Config) tolerance() *big.Int {
-	if c.Tolerance == nil {
-		return new(big.Int)
-	}
-	return c.Tolerance
-}
