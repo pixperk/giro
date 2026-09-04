@@ -109,6 +109,20 @@ one, so a populated demo can be linked to.
 
 `just` on its own lists every recipe. `just check` runs everything CI runs.
 
+### Checking the book
+
+```bash
+giro verify                       # every check, every ledger, records the run
+giro verify --stale-after=4h      # and money that has stopped moving
+giro verify --last                # when each check last ran
+```
+
+Exits 1 on a finding, so a scheduler notices. Alert on two conditions rather
+than one: findings above zero, and the absence of a recent run. A detector that
+stopped running looks exactly like a book with nothing wrong, and every check
+reports what it examined so that "looked and found nothing" is distinguishable
+from "did not look".
+
 ### The api
 
 ```

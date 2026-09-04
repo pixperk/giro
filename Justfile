@@ -147,6 +147,15 @@ db-app-role:
     @echo "created giro_service, a member of giro_app."
     @echo "point the serving DATABASE_URL at it. migrations still need the owner."
 
+# run every invariant check and record that it ran. exits 1 on a finding.
+verify:
+    @go run ./cmd/giro verify --stale-after=4h
+
+# when each check last ran. the other half of alerting: a detector that
+# stopped running looks exactly like a book with nothing wrong.
+verify-last:
+    @go run ./cmd/giro verify --last
+
 # what the serving connection can actually do, which is the only version of
 # this that counts
 privileges:

@@ -17,6 +17,7 @@ usage:
 commands:
   serve      run the http api
   migrate    apply and inspect database migrations
+  verify     run the invariant checks, and record that they ran
 
 run a command with no arguments to see its own usage.
 `
@@ -54,6 +55,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return migrateCommand(ctx, args[1:])
 	case "serve":
 		return serveCommand(ctx, args[1:])
+	case "verify":
+		return verifyCommand(ctx, args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil
