@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining, D58 the hot account.
 
 ---
 
@@ -1483,3 +1483,52 @@ A hot account still costs 44% after all of it, so sharding one across sub-rows
 remains worth roughly 1.8x for that workload — the log is already the source of
 truth and the volumes already a projection, so the pattern fits without
 weakening anything.
+
+---
+
+### D58. The hot account is split by naming it, not by sharding its storage
+
+Every deposit enters a ledger through one account. That account's row lock is
+therefore held by every incoming payment, and the ledger queues behind it --
+the wall this design meets first, and the thing `giro.lock.wait` was
+instrumented to report.
+
+The standard fix is internal sharding: stripe one logical account across N
+rows, write to one at random, read the sum. It is sound in general, and giro
+has the property that makes it safe -- the log is the source of truth and the
+volumes are a projection.
+
+**It was measured and then not built.** Splitting the boundary by counterparty
+instead -- `external:bank:northwind:USD` rather than one `world`, which
+reconciliation wants anyway (D33, D50) -- recovers almost all of the same
+throughput with no engine change at all:
+
+| four writers, database 44ms away | tx/s |
+|---|---|
+| one shared source account | 2.96 |
+| eight counterparty boundary accounts | **5.20** |
+| fully disjoint accounts (the ceiling) | 5.32 |
+
+98% of what is available, from a naming convention. Locally the same comparison
+is 1.74x, and the tail is where it shows: p99 372ms to 53ms, worst case 2.26s
+to 73ms.
+
+**And sharding is not the contained change it looks like.** Post-commit volumes
+are the account's running total, and `VerifyEffectiveVolumes` replays every move
+per (address, asset) to check them. A striped account only knows its own
+stripe, so `pcv` and `pcev` would have to become per-stripe -- changing the
+meaning of a documented API field, requiring a shard column on every move, a
+primary key migration on `accounts_volumes`, and three verification checks
+rewritten. All to reach a number a naming convention already reaches.
+
+There is a second reason, and it decides the general case. Striping only works
+where the per-stripe balance check implies the aggregate one, which means
+accounts permitted to go negative. On a bounded account it produces **false
+refusals**: a customer holding 100 split 50/50 across two stripes is refused a
+payment of 60. So sharding could never have been offered on customer accounts
+anyway -- only on exactly the accounts that a counterparty split already
+handles.
+
+The guidance, therefore: when `giro.lock.wait` climbs, look at which account is
+in the span and split it by counterparty. If that is not possible, the honest
+answer is more ledgers, not more stripes.

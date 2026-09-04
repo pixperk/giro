@@ -527,10 +527,18 @@ giro.commit                 what the caller waited for, retries included
 
 It turns *"the commit took 45ms"* into *"40ms of it was waiting on `world`"*,
 which is a different sentence with a different remedy. Every deposit takes a
-row lock on `world`, making it the hottest row in the system by construction,
-and `giro.lock.wait` climbing is what says when to split it per counterparty.
+row lock on `world`, making it the hottest row in the system by construction.
 Nothing outside the engine can measure that: from the caller's side a contended
 commit and a slow one are identical.
+
+**When it climbs, split the boundary rather than tuning anything.** Give each
+counterparty its own account — `external:bank:northwind:USD` instead of one
+`world` — which [reconciliation](recon/) wants anyway. Measured against a
+database 44ms away, four writers: one shared source ran at 2.96 tx/s, eight
+counterparty accounts at 5.20, and fully disjoint accounts — the ceiling — at
+5.32. A naming convention recovers 98% of what is available, and the tail is
+where it shows: p99 372ms to 53ms. See [D58](DECISIONS.md) for why giro does
+not shard a hot account's storage instead.
 
 [obs/](obs/) has the metric catalogue with its cardinality, the refusal
 taxonomy with who owns each reason, and what to alert on.

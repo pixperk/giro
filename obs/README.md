@@ -151,10 +151,18 @@ nothing to do with their money.
 
 **`giro.lock.wait` p99 climbing.** This is the designed-in wall. Every deposit
 into the ledger takes a row lock on `world`, which makes it the hottest row in
-the system by construction. When this histogram starts climbing, `world` is the
-reason, and splitting it per counterparty — `external:bank:northwind:USD` and
-friends — is the remedy. Nothing outside the engine can measure this: from the
-caller's side, a contended commit and a slow one look identical.
+the system by construction. Nothing outside the engine can measure this: from
+the caller's side, a contended commit and a slow one look identical.
+
+The remedy is a naming change, not a tuning one: split the boundary per
+counterparty — `external:bank:northwind:USD` and friends — which
+reconciliation wants anyway. Measured with the database 44ms away and four
+writers, one shared source ran at 2.96 tx/s against 5.20 across eight
+counterparty accounts, where the ceiling with nothing shared at all is 5.32.
+The tail moves further than the throughput does: p99 372ms to 53ms.
+
+Use the span, not the histogram, to find out *which* account: `giro.lock.slow`
+carries the names.
 
 Set `Options.SlowLock` and the slow waits also land on the trace, naming the
 accounts. The histogram tells you contention is happening; the span tells you

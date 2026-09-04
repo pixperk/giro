@@ -487,3 +487,69 @@ What to look at, in order:
   the curve flat is correct. rising throughput would mean the lock is not held.
 `))
 }
+
+// The alternative to sharding a hot account, and the reason giro does not
+// shard one.
+//
+// Every deposit enters through one account, so that account's row lock is held
+// by every incoming payment and the whole ledger queues behind it. The obvious
+// fix is to stripe its storage across sub-rows. The cheaper fix is to stop
+// having one: give each counterparty its own boundary account, which
+// reconciliation wants anyway (D33).
+//
+// Measured against Postgres 44ms away, four writers: one shared source ran at
+// 2.96 tx/s, eight boundary accounts at 5.20, and fully disjoint accounts --
+// the ceiling, with nothing shared but the ledger row -- at 5.32. The
+// modelling choice recovers 98% of what is available.
+//
+// That is why there is no shard column. Striping would need a primary key
+// migration, a shard on every move, post-commit volumes that mean a stripe
+// rather than an account, and three verification checks rewritten -- to reach
+// a number a naming convention already reaches.
+func TestLoadBoundarySpreadBeatsOneHotSource(t *testing.T) {
+	d := loadEnabled(t)
+	const workers = 16
+
+	// one shared source, permitted to go negative like world
+	hotCtx, hot, hotPool := testStore(t)
+	if err := hot.SetAllowNegative(hotCtx, "external:only", "USD/2", true); err != nil {
+		t.Fatal(err)
+	}
+	var seq atomic.Int64
+	one := drive(t, hot, "one hot source", workers, d, func(ctx context.Context, _, _ int) error {
+		dst := ledger.Address(fmt.Sprintf("payee:%d", seq.Add(1)))
+		_, err := hot.CommitTransaction(ctx, transfer("external:only", dst, 1), CommitOptions{})
+		return err
+	})
+
+	// the same traffic across eight counterparty edges
+	edgeCtx, edges, edgePool := testStore(t)
+	const n = 8
+	for i := range n {
+		edge := ledger.Address(fmt.Sprintf("external:bank:b%d:USD", i))
+		if err := edges.SetAllowNegative(edgeCtx, edge, "USD/2", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seq2 atomic.Int64
+	many := drive(t, edges, "eight boundaries", workers, d, func(ctx context.Context, w, _ int) error {
+		src := ledger.Address(fmt.Sprintf("external:bank:b%d:USD", w%n))
+		dst := ledger.Address(fmt.Sprintf("payee:%d", seq2.Add(1)))
+		_, err := edges.CommitTransaction(ctx, transfer(src, dst, 1), CommitOptions{})
+		return err
+	})
+
+	t.Logf("%v", one)
+	t.Logf("%v", many)
+	t.Logf("splitting the boundary is worth %.2fx here", many.rate()/one.rate())
+
+	// Deliberately no threshold. On loopback the difference is small, because
+	// the lock hold is dominated by the work Postgres does rather than by round
+	// trips -- the gap only opens up when the database is across a network. A
+	// ratio asserted here would fail on the machine where it does not matter
+	// and pass on the one where it does. What is asserted is that both stay
+	// correct; the ratio is reported for a person to read, and the number that
+	// counts is in D58.
+	assertSound(t, hotCtx, hot, hotPool, one)
+	assertSound(t, edgeCtx, edges, edgePool, many)
+}
