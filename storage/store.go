@@ -7,6 +7,7 @@
 package storage
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,13 @@ type Store struct {
 	// serialization failure. sorted lock ordering should keep this at zero, so
 	// a rising count means the ordering has been broken somewhere.
 	retries atomic.Int64
+
+	// assets already seen registered on this ledger, and whether the ledger
+	// itself has been seen to exist. positive answers only: both facts are
+	// permanent once true, so an entry here can never go stale. see
+	// checkAssets for why that is safe and what it buys.
+	registered sync.Map
+	ledgerSeen atomic.Bool
 
 	// where telemetry goes, or nil. see observer.go: nothing is computed when
 	// it is nil, so an unobserved store pays for one comparison per event.

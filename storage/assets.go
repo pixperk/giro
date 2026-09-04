@@ -122,10 +122,34 @@ func (s *Store) checkAssets(ctx context.Context, p ledger.Postings) error {
 	seen := make(map[ledger.Asset]bool, len(p))
 	assets := make([]string, 0, len(p))
 	for _, posting := range p {
-		if !seen[posting.Asset] {
-			seen[posting.Asset] = true
-			assets = append(assets, string(posting.Asset))
+		if seen[posting.Asset] {
+			continue
 		}
+		seen[posting.Asset] = true
+		// Already known registered on this ledger, so there is nothing to ask.
+		//
+		// Only positive answers are remembered, and only because registration
+		// is permanent: the assets_permanent trigger refuses an update or a
+		// delete, so "this asset is registered" cannot stop being true. A
+		// negative is never cached, so an asset registered by another process
+		// is picked up on the very next commit.
+		//
+		// And if this were ever wrong, the foreign key on accounts_volumes
+		// still refuses the write. The cost of a stale entry would be a worse
+		// error message, never a bad row.
+		if _, known := s.registered.Load(posting.Asset); known {
+			continue
+		}
+		assets = append(assets, string(posting.Asset))
+	}
+
+	// every asset already known, and the ledger already seen to exist. this is
+	// the steady state after the first commit, and skipping it removes a round
+	// trip from every commit after that -- which is worth roughly nothing on a
+	// loopback connection and a great deal over a network, where round trips
+	// are most of what a commit costs.
+	if len(assets) == 0 && s.ledgerSeen.Load() {
+		return nil
 	}
 
 	// the ledger's existence rides along, in the same round trip. an
@@ -148,7 +172,13 @@ func (s *Store) checkAssets(ctx context.Context, p ledger.Postings) error {
 	if !exists {
 		return fmt.Errorf("%w: %q", ErrLedgerNotFound, s.ledger)
 	}
+	s.ledgerSeen.Store(true)
 	if missing == nil {
+		// everything asked about came back registered, so none of it needs
+		// asking about again
+		for _, a := range assets {
+			s.registered.Store(ledger.Asset(a), struct{}{})
+		}
 		return nil
 	}
 

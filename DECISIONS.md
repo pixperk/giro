@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency.
 
 ---
 
@@ -434,7 +434,7 @@ Measured on a laptop against local postgres:
 
 | | |
 |---|---|
-| one caller, one ledger | about 1,100 transactions per second |
+| one caller, one ledger | about 1,300 transactions per second |
 | sixteen callers, one ledger | about the same, and zero retries |
 | sixteen callers, eight ledgers | about 3,100 per second |
 | sixteen callers, hot account, p99 | around 600ms, with a tail beyond a second |
@@ -1336,3 +1336,64 @@ happened, and leaving them unused is what stops a replay colliding with a real
 transaction this database no longer remembers — which is also why callers must
 send idempotency keys: re-applying the gap depends on it, and a caller that
 sends none turns step five of the procedure into manual reconciliation.
+
+---
+
+### D55. A commit is nine round trips, and that is the number that matters
+
+Turning durability off bought 15%, so fsync was never the bottleneck. Tracing
+the commit path showed where the time actually goes: **eleven round trips to
+Postgres**, and on loopback that arithmetic closed exactly — 11 x 28us of
+network plus ~570us of real work is 878us, against 879us measured.
+
+Two were removed, and both traded a query for an assumption worth writing down.
+
+**The log entry and the chain tip it advances are one statement.** They were an
+insert followed by an update on `ledgers`; neither reads the other, so a data
+modifying CTE does both in one round trip. Both still pass through their own
+triggers, which is the thing worth testing rather than assuming.
+
+**checkAssets remembers what it has been told.** It ran before every commit to
+confirm the ledger exists and the assets are registered. Positive answers are
+now cached, and only positive ones: registration is permanent, enforced by
+`assets_permanent`, so "this asset is registered" cannot stop being true. A
+negative is never cached, so an asset registered by another process is visible
+on the very next commit rather than after a restart. And if the cache were ever
+wrong the foreign key still refuses the write — the cost of a stale entry is a
+worse error message, never a bad row.
+
+Together: 11 round trips to 9, and about 13% locally. The local number is not
+the point.
+
+**The point is what distance does.** Measured against a hosted Postgres in
+us-east-2 from a laptop 279ms away:
+
+| | |
+|---|---|
+| round trip | 279ms |
+| one commit | 3.7s |
+| one caller | 0.27 tx/s |
+| four callers | 0.16 tx/s |
+| sixteen callers | 0.12 tx/s |
+
+Throughput *falls* as callers are added. The ledger row lock is taken to
+allocate ids and held until commit, which is several round trips — so at 279ms
+that lock is held for seconds, there is no parallelism to win, and the queueing
+is pure cost. On loopback the same lock is held for a few hundred microseconds
+and the curve is flat instead.
+
+So **single-ledger throughput is roughly one over the time the ledger row lock
+is held**, and that time is dominated by round trips rather than by work. Two
+consequences follow, in this order:
+
+1. **Co-locate the database.** Same availability zone. It is worth more than
+   any optimisation available in this repository, by an order of magnitude.
+2. **Removing a round trip that falls between allocating ids and committing is
+   worth more than removing one outside that window**, because only the former
+   shortens the lock hold. That is the shape of any future work here.
+
+The run also answered a question that had only ever been reasoned about: giro
+is **correct** through a transaction pooler over a hostile network. Conservation,
+the hash chain and the projection all verified after concurrent writers at
+279ms, with zero retries, and prepared statements worked through PgBouncer as
+D36 requires. Slow, and right.

@@ -599,6 +599,13 @@ deployment.
 | `just load [30s]` | Sustained load with latency percentiles, and the invariants checked after |
 | `just bench` | What one commit costs with nothing else happening |
 
+**Put the database in the same availability zone.** A commit is nine round
+trips, so throughput is roughly one over the time the ledger row lock is held,
+and that time is dominated by network distance rather than by work. Measured
+against a hosted Postgres 279ms away: 3.7s per commit, 0.27 tx/s, and
+throughput *falls* as callers are added — there is no parallelism to win and
+the queueing is pure cost. This is worth more than any tuning.
+
 **Know your tail, not your throughput.** `just load` runs sustained scenarios
 and reports p50/p95/p99 alongside the rate. Throughput on one ledger is flat
 from 1 caller to 32 — that is the serialisation working — so rising concurrency

@@ -95,15 +95,22 @@ func (s *Store) insertLog(ctx context.Context, tx pgx.Tx, l *ledger.Log) error {
 		key, hash = &l.IdempotencyKey, &l.IdempotencyHash
 	}
 
-	if _, err := tx.Exec(ctx, `
-		insert into logs (ledger, id, type, data, date, hash, idempotency_key, idempotency_hash)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		s.ledger, l.ID, string(l.Type), l.Data, l.Date, l.Hash, key, hash); err != nil {
-		return err
-	}
-
-	_, err := tx.Exec(ctx,
-		`update ledgers set last_log_hash = $2 where name = $1`, s.ledger, l.Hash)
+	// one statement, not two. the entry and the chain tip it advances are
+	// independent writes -- neither reads the other -- so they cost one round
+	// trip rather than two, and a commit is mostly round trips once the
+	// database is on the far side of a network.
+	//
+	// the data modifying CTE runs both; postgres gives no ordering guarantee
+	// between them and none is needed. both still pass through their own
+	// triggers, the append-only guard on logs and the counter guard on
+	// ledgers, exactly as they did as separate statements.
+	_, err := tx.Exec(ctx, `
+		with entry as (
+			insert into logs (ledger, id, type, data, date, hash, idempotency_key, idempotency_hash)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)
+		)
+		update ledgers set last_log_hash = $6 where name = $1`,
+		s.ledger, l.ID, string(l.Type), l.Data, l.Date, l.Hash, key, hash)
 	return err
 }
 
