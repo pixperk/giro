@@ -58,6 +58,13 @@ test:
 test-restricted:
     GIRO_TEST_ROLE=giro_app go test -race ./storage/
 
+# replay a property test failure. the seed is printed by every run, and CI
+# prints it too, so a failure carries its own reproduction.
+#
+#   just replay 1788499781666073000
+replay SEED:
+    GIRO_TEST_SEED={{ SEED }} go test -race -v -run 'Conserve|Random|Ordering' ./...
+
 # run tests matching a pattern, e.g. just test-one VolumeUpdates
 test-one PATTERN:
     go test -race -run {{ PATTERN }} -v ./...

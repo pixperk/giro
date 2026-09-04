@@ -1053,7 +1053,31 @@ simply wrong, recorded consistently in both the rate and the amounts, passes
 every check here while the trade is nine thousand dollars light. Only comparing
 against the venue's own statement finds that, which is reconciliation.
 
-### D40. Going below zero is a permission on a row, not a name
+### D40. Property tests get a new seed every run, and print it
+
+Three tests generate random transactions and assert the book survives. All
+three were seeded with a constant, so they generated the same two thousand
+cases on every run, for ever. They found bugs once and could never find
+another, while continuing to look like they were searching.
+
+A property test earns its cost by going looking. Fixing the seed turns it into
+a very elaborate unit test.
+
+The seed is now the clock, printed on every run, and `GIRO_TEST_SEED` replays
+one:
+
+```
+seed 1788499781666073000: replay with GIRO_TEST_SEED=1788499781666073000
+```
+
+That keeps the reason fixed seeds are tempting. A failure nobody can reproduce
+is not much use at three in the morning, and a random test that prints nothing
+is exactly that. Printing the seed unconditionally costs nothing, because `go
+test` only shows output for tests that fail or run with `-v`.
+
+`just replay <seed>` runs them against a given one.
+
+### D41. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

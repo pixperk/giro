@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"errors"
-	"math/rand/v2"
 	"testing"
 
 	"github.com/pixperk/giro/ledger"
@@ -117,7 +116,7 @@ func TestProjectionSurvivesRandomActivity(t *testing.T) {
 	ctx, s, _ := testStore(t)
 
 	accounts := []ledger.Address{"alice", "bob", "carol", "fees:platform"}
-	rng := rand.New(rand.NewPCG(3, 5))
+	rng := seededRand(t)
 	for _, a := range accounts {
 		fund(t, ctx, s, a, 1_000_000)
 	}
