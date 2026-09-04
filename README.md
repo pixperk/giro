@@ -38,9 +38,16 @@ Five minutes to a working ledger. Requires Go 1.26 and PostgreSQL 17.
 createdb giro && createdb giro_test
 cp .env.example .env          # then edit the connection strings
 
-just migrate                  # apply the schema
 just db-app-role              # create the role the service connects as
+just migrate                  # apply the schema, as the owner
 ```
+
+`.env` names two roles because a deployment has two. `DATABASE_URL` is what
+everything reads and points at `giro_service`, which can move money and cannot
+alter a table. `GIRO_OWNER_DATABASE_URL` is read by the justfile only, so
+`just migrate` runs as the role that owns the tables — the binary still reads a
+single variable, and the recipe sets it for the length of one command exactly
+as a deployment's migration step does.
 
 `DATABASE_URL` is what everything reads. Migrations need the role that owns the
 tables; serving must not have it, because a table's owner can switch off the

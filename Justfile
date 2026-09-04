@@ -22,7 +22,20 @@ new NAME:
     @go run ./cmd/giro migrate new {{ NAME }}
 
 _migrate CMD:
-    @go run ./cmd/giro migrate {{ CMD }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Migrations need the role that owns the tables; DATABASE_URL is the
+    # serving role and deliberately cannot create one. The binary still reads a
+    # single variable (D52) -- this recipe just sets it to the right thing for
+    # the length of one command, which is what a deploy step does too.
+    url="${GIRO_OWNER_DATABASE_URL:-}"
+    if [ -z "$url" ]; then
+      echo "GIRO_OWNER_DATABASE_URL is not set." >&2
+      echo "migrations need the role that owns the tables; DATABASE_URL is the" >&2
+      echo "serving role and cannot create one. see .env.example." >&2
+      exit 1
+    fi
+    DATABASE_URL="$url" go run ./cmd/giro migrate {{ CMD }}
 
 # apply migrations to the test database
 migrate-test:
