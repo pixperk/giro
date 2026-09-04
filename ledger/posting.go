@@ -51,11 +51,38 @@ type Posting struct {
 	Destination Address  `json:"destination"`
 	Asset       Asset    `json:"asset"`
 	Amount      *big.Int `json:"amount"`
+
+	// UpTo makes Amount a ceiling rather than a figure: the posting moves what
+	// the source actually holds, up to Amount, and a nil Amount means no
+	// ceiling at all.
+	//
+	// This exists because "move whatever is there" is not expressible as a
+	// number the caller can know. Reading the balance and then posting it is
+	// two operations with a gap: the balance grows in between and the sweep is
+	// short, or it shrinks and the commit is refused. Neither corrupts
+	// anything, and neither is the operation anybody wanted.
+	//
+	// Resolved inside the transaction, after the row is locked and before the
+	// balance is checked, which is the only moment the answer is both known
+	// and pinned.
+	UpTo bool `json:"upTo,omitempty"`
 }
 
 // a transaction is an ordered list of postings applied atomically. the order
 // matters: money can flow through an account within one transaction.
 type Postings []Posting
+
+// HasUpTo reports whether any posting carries a ceiling that has to be
+// resolved against live balances. Checked so the ordinary path, which is
+// almost every transaction, does nothing extra.
+func (p Postings) HasUpTo() bool {
+	for _, posting := range p {
+		if posting.UpTo {
+			return true
+		}
+	}
+	return false
+}
 
 // returns the failing index and error for the first invalid posting,
 // or (-1, nil) if all are valid.
@@ -70,10 +97,13 @@ func (p Postings) Validate() (int, error) {
 		if !posting.Asset.Valid() {
 			return i, ErrInvalidAsset
 		}
-		if posting.Amount == nil || posting.Amount.Sign() < 0 {
+		if posting.Amount == nil && !posting.UpTo {
 			return i, ErrInvalidAmount
 		}
-		if posting.Amount.BitLen() > maxAmountBits {
+		if posting.Amount != nil && posting.Amount.Sign() < 0 {
+			return i, ErrInvalidAmount
+		}
+		if posting.Amount != nil && posting.Amount.BitLen() > maxAmountBits {
 			return i, ErrAmountTooLarge
 		}
 	}

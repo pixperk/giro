@@ -74,17 +74,28 @@ func (p Postings) VolumeUpdates() []VolumeUpdate {
 	}
 
 	for i, posting := range p {
-		if posting.Amount == nil {
+		amount := posting.Amount
+
+		// an UpTo posting may carry no ceiling at all, and that nil is a
+		// legitimate "no limit" rather than a malformed request. it
+		// contributes nothing to the deltas here because its real figure is
+		// not known until the rows are locked; what this pass is for is naming
+		// the (account, asset) pairs to lock, and those are the same either
+		// way. the caller recomputes once the amount is resolved.
+		if amount == nil && posting.UpTo {
+			amount = new(big.Int)
+		}
+		if amount == nil {
 			panic(fmt.Sprintf("ledger: postings[%d] has nil amount, call Validate first", i))
 		}
 
 		// a self posting resolves to the same entry twice, so both counters
 		// move and the balance is unchanged. no special case needed.
 		src := at(posting.Source, posting.Asset)
-		src.Output.Add(src.Output, posting.Amount)
+		src.Output.Add(src.Output, amount)
 
 		dst := at(posting.Destination, posting.Asset)
-		dst.Input.Add(dst.Input, posting.Amount)
+		dst.Input.Add(dst.Input, amount)
 	}
 
 	updates := make([]VolumeUpdate, 0, len(index))

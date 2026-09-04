@@ -1115,3 +1115,41 @@ func newLedgerWithoutAssets(t *testing.T, s *Server, name string) string {
 	}
 	return base
 }
+
+// A sweep over the wire. The caller cannot know the amount, so it does not
+// send one; the committed transaction reports what actually moved.
+func TestSweepOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	fund(t, s, base, "client:acme:wallet", 42317)
+
+	rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{{
+			"source": "client:acme:wallet", "destination": "treasury:usd",
+			"asset": "USD/2", "upTo": true,
+		}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	tx := decode[Transaction](t, rec)
+	if got := tx.Postings[0].Amount; got == nil || got.Int64() != 42317 {
+		t.Errorf("recorded %v, want the 42317 that moved", got)
+	}
+
+	balances := decode[Balances](t, do(t, s, http.MethodGet, base+"/accounts/treasury:usd/balances", nil))
+	if balances["USD/2"].Int64() != 42317 {
+		t.Errorf("treasury = %v", balances["USD/2"])
+	}
+
+	// and an amount is still required without upTo, rather than defaulting
+	missing := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{{
+			"source": "client:acme:wallet", "destination": "treasury:usd", "asset": "USD/2",
+		}},
+	})
+	if missing.Code != http.StatusBadRequest {
+		t.Errorf("a posting with no amount = %d, want 400: %s", missing.Code, missing.Body.String())
+	}
+}

@@ -34,66 +34,66 @@ func TestPostingsValidate(t *testing.T) {
 		},
 		{
 			why:     "well formed",
-			p:       Postings{{"world", "users:alice", "USD/2", n(10000)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(10000)}},
 			wantIdx: -1,
 		},
 		{
 			why:     "zero amount is allowed",
-			p:       Postings{{"world", "users:alice", "USD/2", n(0)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(0)}},
 			wantIdx: -1,
 		},
 		{
 			why:     "self posting is allowed",
-			p:       Postings{{"users:alice", "users:alice", "USD/2", n(500)}},
+			p:       Postings{{Source: "users:alice", Destination: "users:alice", Asset: "USD/2", Amount: n(500)}},
 			wantIdx: -1,
 		},
 		{
 			why:     "bad source",
-			p:       Postings{{"wor ld", "users:alice", "USD/2", n(1)}},
+			p:       Postings{{Source: "wor ld", Destination: "users:alice", Asset: "USD/2", Amount: n(1)}},
 			wantIdx: 0,
 			wantErr: ErrInvalidSourceAddress,
 		},
 		{
 			why:     "bad destination",
-			p:       Postings{{"world", "a::b", "USD/2", n(1)}},
+			p:       Postings{{Source: "world", Destination: "a::b", Asset: "USD/2", Amount: n(1)}},
 			wantIdx: 0,
 			wantErr: ErrInvalidDestinationAddress,
 		},
 		{
 			why:     "bad asset",
-			p:       Postings{{"world", "users:alice", "usd", n(1)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "usd", Amount: n(1)}},
 			wantIdx: 0,
 			wantErr: ErrInvalidAsset,
 		},
 		{
 			why:     "negative amount",
-			p:       Postings{{"world", "users:alice", "USD/2", n(-1)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(-1)}},
 			wantIdx: 0,
 			wantErr: ErrInvalidAmount,
 		},
 		{
 			why:     "nil amount",
-			p:       Postings{{"world", "users:alice", "USD/2", nil}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: nil}},
 			wantIdx: 0,
 			wantErr: ErrInvalidAmount,
 		},
 		{
 			why:     "a 99 digit amount is fine, the cap is a size guard not a limit",
-			p:       Postings{{"world", "users:alice", "USD/2", digits(99)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: digits(99)}},
 			wantIdx: -1,
 		},
 		{
 			why:     "an absurd amount is rejected before it reaches postgres",
-			p:       Postings{{"world", "users:alice", "USD/2", digits(500)}},
+			p:       Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: digits(500)}},
 			wantIdx: 0,
 			wantErr: ErrAmountTooLarge,
 		},
 		{
 			why: "reports the index of the first bad posting, not the first posting",
 			p: Postings{
-				{"world", "users:alice", "USD/2", n(100)},
-				{"users:alice", "users:bob", "USD/2", n(50)},
-				{"users:bob", "users:carol", "USD/2", n(-1)},
+				{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(100)},
+				{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(50)},
+				{Source: "users:bob", Destination: "users:carol", Asset: "USD/2", Amount: n(-1)},
 			},
 			wantIdx: 2,
 			wantErr: ErrInvalidAmount,
@@ -115,8 +115,8 @@ func TestPostingsValidate(t *testing.T) {
 
 func TestPostingsReverse(t *testing.T) {
 	t.Run("single posting swaps sides", func(t *testing.T) {
-		got := Postings{{"users:alice", "users:bob", "USD/2", n(3000)}}.Reverse()
-		want := Postings{{"users:bob", "users:alice", "USD/2", n(3000)}}
+		got := Postings{{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)}}.Reverse()
+		want := Postings{{Source: "users:bob", Destination: "users:alice", Asset: "USD/2", Amount: n(3000)}}
 		assertPostings(t, got, want)
 	})
 
@@ -124,21 +124,21 @@ func TestPostingsReverse(t *testing.T) {
 	// B before C has returned anything, so B dips negative mid transaction.
 	t.Run("chain reverses order as well as sides", func(t *testing.T) {
 		got := Postings{
-			{"A", "B", "USD/2", n(100)},
-			{"B", "C", "USD/2", n(100)},
+			{Source: "A", Destination: "B", Asset: "USD/2", Amount: n(100)},
+			{Source: "B", Destination: "C", Asset: "USD/2", Amount: n(100)},
 		}.Reverse()
 		want := Postings{
-			{"C", "B", "USD/2", n(100)},
-			{"B", "A", "USD/2", n(100)},
+			{Source: "C", Destination: "B", Asset: "USD/2", Amount: n(100)},
+			{Source: "B", Destination: "A", Asset: "USD/2", Amount: n(100)},
 		}
 		assertPostings(t, got, want)
 	})
 
 	t.Run("reversing twice is the identity", func(t *testing.T) {
 		original := Postings{
-			{"A", "B", "USD/2", n(100)},
-			{"B", "C", "USD/2", n(60)},
-			{"C", "D", "EUR/2", n(40)},
+			{Source: "A", Destination: "B", Asset: "USD/2", Amount: n(100)},
+			{Source: "B", Destination: "C", Asset: "USD/2", Amount: n(60)},
+			{Source: "C", Destination: "D", Asset: "EUR/2", Amount: n(40)},
 		}
 		assertPostings(t, original.Reverse().Reverse(), original)
 	})
@@ -147,7 +147,7 @@ func TestPostingsReverse(t *testing.T) {
 	// rewrite history.
 	t.Run("amounts are copied, not aliased", func(t *testing.T) {
 		amount := n(100)
-		original := Postings{{"A", "B", "USD/2", amount}}
+		original := Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: amount}}
 		reversed := original.Reverse()
 
 		amount.SetInt64(999)
@@ -169,7 +169,7 @@ func TestPostingsReverse(t *testing.T) {
 				t.Error("expected a panic")
 			}
 		}()
-		Postings{{"A", "B", "USD/2", nil}}.Reverse()
+		Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.Reverse()
 	})
 }
 
@@ -179,7 +179,7 @@ func TestPostingJSONPrecision(t *testing.T) {
 	const huge = "100000000000000000000000000000001"
 
 	amount, _ := new(big.Int).SetString(huge, 10)
-	raw, err := json.Marshal(Posting{"world", "users:alice", "USD/2", amount})
+	raw, err := json.Marshal(Posting{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: amount})
 	if err != nil {
 		t.Fatal(err)
 	}

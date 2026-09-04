@@ -664,7 +664,7 @@ components:
 
     Posting:
       type: object
-      required: [source, destination, asset, amount]
+      required: [source, destination, asset]
       properties:
         source:
           type: string
@@ -678,7 +678,30 @@ components:
           pattern: '^[A-Z][A-Z0-9_]*(/\d{1,6})?$'
           description: Carries its own scale. `USD/2` means two decimal places.
           example: "USD/2"
-        amount: { $ref: "#/components/schemas/Amount" }
+        # already a pointer, so the generator must not wrap it in a second one
+        # when the field becomes optional. nil means "no amount given", which
+        # is what upTo needs and what validation rejects otherwise.
+        amount:
+          allOf: [{ $ref: "#/components/schemas/Amount" }]
+          x-go-type-skip-optional-pointer: true
+        upTo:
+          type: boolean
+          default: false
+          description: |
+            Makes `amount` a ceiling rather than a figure: move what the source
+            actually holds, up to it. Omit `amount` entirely for no ceiling,
+            which is a sweep.
+
+            The amount is resolved inside the transaction once the row is
+            locked, so it cannot be stale. Reading a balance and then posting
+            it is two operations with a gap: the balance grows in between and
+            the sweep is short, or it shrinks and the commit is refused.
+
+            The committed transaction records the figure that moved, not the
+            ceiling that was asked for.
+
+            Refused for an account permitted a negative balance, which holds no
+            determinate amount to move.
 
     Volumes:
       type: object

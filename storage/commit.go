@@ -172,6 +172,17 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 		s.afterLock()
 	}
 
+	// the rows are locked, so what each source holds is now both known and
+	// fixed. any ceiling becomes the figure it resolves to, and the volume
+	// deltas are recomputed from it: the keys are unchanged, so the locks
+	// already taken are still the right ones in the right order.
+	if p.HasUpTo() {
+		if p, err = resolveUpTo(p, before); err != nil {
+			return nil, alloc, err
+		}
+		updates = p.VolumeUpdates()
+	}
+
 	if err := checkBalances(before, updates); err != nil {
 		return nil, alloc, err
 	}
@@ -261,4 +272,90 @@ func postCommitVolumes(before map[key]locked, updates []ledger.VolumeUpdate) led
 		})
 	}
 	return out
+}
+
+// resolveUpTo replaces the ceiling on every UpTo posting with what the source
+// actually holds.
+//
+// It runs after lockVolumes and before checkBalances, which is the only window
+// where the answer is both known and pinned: the rows are locked, so no
+// concurrent commit can change a balance between deciding the amount and
+// moving it. Deciding it any earlier is the read-then-write gap this exists to
+// close.
+//
+// Lock order is unaffected. Locks are taken per (account, asset) and an
+// amount does not name a row, so rewriting one cannot reorder anything. The
+// volume updates do carry amounts, so they are recomputed by the caller.
+//
+// Postings are applied in order and a source drained by an earlier one leaves
+// nothing for a later one, which is the same rule as any other posting: money
+// can flow through an account within a transaction, and order is what decides
+// what is there when each posting runs.
+func resolveUpTo(p ledger.Postings, before map[key]locked) (ledger.Postings, error) {
+	// running balances, so two postings drawing on the same account in one
+	// transaction see each other rather than both claiming the whole balance
+	running := make(map[key]*big.Int, len(before))
+	for k, v := range before {
+		running[k] = v.Balance()
+	}
+
+	out := make(ledger.Postings, len(p))
+	for i, posting := range p {
+		out[i] = posting
+		src := key{posting.Source, posting.Asset}
+
+		if !posting.UpTo {
+			if amount := posting.Amount; amount != nil {
+				running[src] = new(big.Int).Sub(orZero(running[src]), amount)
+				dst := key{posting.Destination, posting.Asset}
+				running[dst] = new(big.Int).Add(orZero(running[dst]), amount)
+			}
+			continue
+		}
+
+		// an account permitted a negative balance holds no determinate amount.
+		// world is the whole outside world and a contra account is a running
+		// total of a cost, and "everything either of them has" is not a
+		// number. refusing is the only honest answer: the alternative is
+		// picking one and calling it the balance.
+		if v, ok := before[src]; ok && v.allowNegative {
+			return nil, &UnboundedSweepError{Account: posting.Source, Asset: posting.Asset}
+		}
+
+		available := orZero(running[src])
+		if available.Sign() < 0 {
+			available = new(big.Int)
+		}
+		if posting.Amount != nil && posting.Amount.Cmp(available) < 0 {
+			available = posting.Amount
+		}
+
+		out[i].Amount = new(big.Int).Set(available)
+		out[i].UpTo = false // resolved: what is recorded is what moved
+
+		running[src] = new(big.Int).Sub(orZero(running[src]), available)
+		dst := key{posting.Destination, posting.Asset}
+		running[dst] = new(big.Int).Add(orZero(running[dst]), available)
+	}
+	return out, nil
+}
+
+func orZero(i *big.Int) *big.Int {
+	if i == nil {
+		return new(big.Int)
+	}
+	return i
+}
+
+// UnboundedSweepError is returned when a posting asks to move everything an
+// account holds and that account is permitted a negative balance, so there is
+// no such amount.
+type UnboundedSweepError struct {
+	Account ledger.Address
+	Asset   ledger.Asset
+}
+
+func (e *UnboundedSweepError) Error() string {
+	return fmt.Sprintf("%s is permitted a negative balance in %s, so it holds no determinate amount to move",
+		e.Account, e.Asset)
 }

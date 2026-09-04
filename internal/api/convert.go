@@ -51,6 +51,9 @@ func toAPIPostings(p ledger.Postings) []Posting {
 			Asset:       string(posting.Asset),
 			Amount:      posting.Amount,
 		}
+		// a committed transaction records what moved, never a ceiling, so
+		// upTo is deliberately not echoed back: it is resolved by then and
+		// returning it would suggest the figure is still provisional.
 	}
 	return out
 }
@@ -60,12 +63,20 @@ func fromAPIPostings(p []Posting) ledger.Postings {
 	for i, posting := range p {
 		// copied rather than aliased: a caller's slice must not stay reachable
 		// from a transaction the ledger has committed.
-		amount := new(big.Int).Set(posting.Amount)
+		//
+		// a nil amount is left nil rather than defaulted to zero. with upTo it
+		// means no ceiling; without it, validation rejects it, which is the
+		// behaviour a missing amount should have.
+		var amount *big.Int
+		if posting.Amount != nil {
+			amount = new(big.Int).Set(posting.Amount)
+		}
 		out[i] = ledger.Posting{
 			Source:      ledger.Address(posting.Source),
 			Destination: ledger.Address(posting.Destination),
 			Asset:       ledger.Asset(posting.Asset),
 			Amount:      amount,
+			UpTo:        posting.UpTo != nil && *posting.UpTo,
 		}
 	}
 	return out

@@ -38,10 +38,10 @@ func TestVolumeUpdates(t *testing.T) {
 	t.Run("an account in several postings collapses to one entry", func(t *testing.T) {
 		// treasury receives once and pays out three times
 		got := Postings{
-			{"world", "treasury", "USD/2", n(10000)},
-			{"treasury", "users:alice", "USD/2", n(6000)},
-			{"treasury", "users:bob", "USD/2", n(3000)},
-			{"treasury", "fees:platform", "USD/2", n(1000)},
+			{Source: "world", Destination: "treasury", Asset: "USD/2", Amount: n(10000)},
+			{Source: "treasury", Destination: "users:alice", Asset: "USD/2", Amount: n(6000)},
+			{Source: "treasury", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)},
+			{Source: "treasury", Destination: "fees:platform", Asset: "USD/2", Amount: n(1000)},
 		}.VolumeUpdates()
 
 		assertUpdates(t, got, []VolumeUpdate{
@@ -56,7 +56,7 @@ func TestVolumeUpdates(t *testing.T) {
 	// source and destination resolve to the same entry, so both counters move.
 	// balance is unchanged but the row remembers the money went round.
 	t.Run("self posting moves both counters", func(t *testing.T) {
-		got := Postings{{"users:alice", "users:alice", "USD/2", n(500)}}.VolumeUpdates()
+		got := Postings{{Source: "users:alice", Destination: "users:alice", Asset: "USD/2", Amount: n(500)}}.VolumeUpdates()
 		assertUpdates(t, got, []VolumeUpdate{
 			{"users:alice", "USD/2", n(500), n(500)},
 		})
@@ -66,8 +66,8 @@ func TestVolumeUpdates(t *testing.T) {
 	// and the amounts are never combined.
 	t.Run("assets never mix", func(t *testing.T) {
 		got := Postings{
-			{"world", "users:alice", "USD/2", n(10000)},
-			{"world", "users:alice", "EUR/2", n(9200)},
+			{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(10000)},
+			{Source: "world", Destination: "users:alice", Asset: "EUR/2", Amount: n(9200)},
 		}.VolumeUpdates()
 
 		assertUpdates(t, got, []VolumeUpdate{
@@ -80,9 +80,9 @@ func TestVolumeUpdates(t *testing.T) {
 
 	t.Run("sorted by account then asset", func(t *testing.T) {
 		got := Postings{
-			{"zzz", "aaa", "USD/2", n(1)},
-			{"mmm", "aaa", "EUR/2", n(1)},
-			{"aaa", "zzz", "BTC/8", n(1)},
+			{Source: "zzz", Destination: "aaa", Asset: "USD/2", Amount: n(1)},
+			{Source: "mmm", Destination: "aaa", Asset: "EUR/2", Amount: n(1)},
+			{Source: "aaa", Destination: "zzz", Asset: "BTC/8", Amount: n(1)},
 		}.VolumeUpdates()
 
 		want := []string{
@@ -109,7 +109,7 @@ func TestVolumeUpdates(t *testing.T) {
 				t.Error("expected a panic")
 			}
 		}()
-		Postings{{"A", "B", "USD/2", nil}}.VolumeUpdates()
+		Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.VolumeUpdates()
 	})
 }
 
@@ -118,11 +118,11 @@ func TestVolumeUpdates(t *testing.T) {
 // under concurrency, which is why it gets its own test.
 func TestVolumeUpdatesOrderIsDeterministic(t *testing.T) {
 	p := Postings{
-		{"world", "treasury:incoming", "USD/2", n(50000)},
-		{"treasury:incoming", "escrow:order:1001", "USD/2", n(20000)},
-		{"escrow:order:1001", "merchants:acme", "USD/2", n(18000)},
-		{"escrow:order:1001", "fees:platform", "USD/2", n(2000)},
-		{"world", "merchants:acme", "EUR/2", n(4500)},
+		{Source: "world", Destination: "treasury:incoming", Asset: "USD/2", Amount: n(50000)},
+		{Source: "treasury:incoming", Destination: "escrow:order:1001", Asset: "USD/2", Amount: n(20000)},
+		{Source: "escrow:order:1001", Destination: "merchants:acme", Asset: "USD/2", Amount: n(18000)},
+		{Source: "escrow:order:1001", Destination: "fees:platform", Asset: "USD/2", Amount: n(2000)},
+		{Source: "world", Destination: "merchants:acme", Asset: "EUR/2", Amount: n(4500)},
 	}
 
 	first := orderOf(p.VolumeUpdates())
@@ -171,7 +171,7 @@ func TestVolumeUpdatesConserveValue(t *testing.T) {
 // direction of the counters, which conservation alone would not catch if both
 // were swapped.
 func TestVolumeUpdatesDirection(t *testing.T) {
-	got := Postings{{"payer", "payee", "USD/2", n(100)}}.VolumeUpdates()
+	got := Postings{{Source: "payer", Destination: "payee", Asset: "USD/2", Amount: n(100)}}.VolumeUpdates()
 
 	assertUpdates(t, got, []VolumeUpdate{
 		{"payee", "USD/2", n(100), n(0)}, // arrived, so input

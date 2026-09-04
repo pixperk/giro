@@ -1077,7 +1077,57 @@ test` only shows output for tests that fail or run with `-v`.
 
 `just replay <seed>` runs them against a given one.
 
-### D41. Going below zero is a permission on a row, not a name
+### D41. A posting can move whatever is there
+
+Sweeping a client's sub-wallet into the treasury needs an amount the caller
+cannot know. Reading the balance and then posting it is two operations with a
+gap: the balance grows in between and the sweep is short, or it shrinks and the
+commit is refused.
+
+Neither corrupts anything. The overdraw guard sees to that, so the book is
+never wrong either way. But "move whatever is there" did not exist as an
+operation, so every caller reimplemented it with the same race.
+
+`Posting.UpTo` makes `Amount` a ceiling rather than a figure, and a nil amount
+means no ceiling at all:
+
+```json
+{ "source": "client:acme:wallet", "destination": "treasury:usd",
+  "asset": "USD/2", "upTo": true }
+```
+
+**Resolved after the lock and before the balance check.** That is the only
+window where the answer is both known and pinned, and it is the whole point:
+nothing can change the balance between deciding the amount and moving it. Eight
+concurrent sweeps of one account move exactly its balance in total, no more and
+no less.
+
+Lock order is untouched, because locks are taken per `(account, asset)` and an
+amount does not name a row. The volume deltas do carry amounts, so they are
+recomputed once the figure is known.
+
+**The transaction records what moved, never the ceiling.** `upTo` is not echoed
+back on a committed transaction: it is resolved by then, and returning it would
+suggest the figure is still provisional.
+
+Three cases worth stating, because each could plausibly have gone the other
+way.
+
+*Sweeping an empty account commits a zero posting rather than failing.* A job
+that errors when there is simply no work makes "nothing to do"
+indistinguishable from "broken", and giro permits zero amounts already.
+
+*Two sweeps of one account in one transaction see each other.* The first drains
+it and the second finds nothing, which is the same rule every posting follows:
+money flows through an account within a transaction and order decides what is
+there when each one runs.
+
+*Sweeping an account permitted a negative balance is refused.* `world` is the
+whole outside world and a contra account is a running total of a cost. Neither
+holds a determinate amount, so "everything it has" is not a number, and picking
+one and calling it the balance would be worse than refusing.
+
+### D42. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

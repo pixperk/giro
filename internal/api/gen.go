@@ -221,10 +221,7 @@ type MovePage struct {
 
 // Posting defines model for Posting.
 type Posting struct {
-	// Amount Arbitrary precision integer in the asset's smallest unit. May exceed 2^53.
-	//
-	// Example: 10000
-	Amount Amount `json:"amount"`
+	Amount Amount `json:"amount,omitempty"`
 
 	// Asset Carries its own scale. `USD/2` means two decimal places.
 	//
@@ -238,6 +235,22 @@ type Posting struct {
 	//
 	// Example: world
 	Source string `json:"source"`
+
+	// UpTo Makes `amount` a ceiling rather than a figure: move what the source
+	// actually holds, up to it. Omit `amount` entirely for no ceiling,
+	// which is a sweep.
+	//
+	// The amount is resolved inside the transaction once the row is
+	// locked, so it cannot be stale. Reading a balance and then posting
+	// it is two operations with a gap: the balance grows in between and
+	// the sweep is short, or it shrinks and the commit is refused.
+	//
+	// The committed transaction records the figure that moved, not the
+	// ceiling that was asked for.
+	//
+	// Refused for an account permitted a negative balance, which holds no
+	// determinate amount to move.
+	UpTo *bool `json:"upTo,omitempty"`
 }
 
 // Reversal The pair, so a caller does not have to fetch the other half.
