@@ -16,6 +16,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pixperk/giro/ledger"
+	"github.com/pixperk/giro/storage"
+	"math/big"
 )
 
 // the cli is thin, but it is the layer where a real bug already hid: the up
@@ -416,4 +419,92 @@ func TestServeWarnsWhenItCanDisableItsOwnGuards(t *testing.T) {
 	if warning := captureStderr(t, func() { warnIfPrivileged(ctx, quiet) }); warning != "" {
 		t.Errorf("the restricted role was warned anyway: %q", warning)
 	}
+}
+
+// The command that runs the checks. It is the piece an operator schedules, so
+// the thing that matters most is what it does to the exit code: a scheduler
+// notices a non-zero exit and ignores anything printed.
+func TestVerifyCommand(t *testing.T) {
+	ctx := context.Background()
+	url := isolatedDatabase(t)
+
+	if _, err := captureOutput(t, func() error { return dispatch(ctx, []string{"migrate", "up"}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('main')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		"insert into assets (ledger, asset) values ('main', 'USD/2')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.New(pool, "main").CommitTransaction(ctx, ledger.Postings{
+		{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: big.NewInt(10000)},
+	}, storage.CommitOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("a sound ledger passes and says what it examined", func(t *testing.T) {
+		out, err := captureOutput(t, func() error { return dispatch(ctx, []string{"verify"}) })
+		if err != nil {
+			t.Fatalf("a sound ledger failed: %v\n%s", err, out)
+		}
+		for _, check := range []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions"} {
+			if !strings.Contains(out, check) {
+				t.Errorf("%s did not run:\n%s", check, out)
+			}
+		}
+		if !strings.Contains(out, "checked") {
+			t.Error("the output does not say what was examined, so a run against nothing looks like a pass")
+		}
+	})
+
+	t.Run("running records that it ran", func(t *testing.T) {
+		out, err := captureOutput(t, func() error { return dispatch(ctx, []string{"verify", "--last"}) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out, "never run") {
+			t.Errorf("the previous run was not recorded:\n%s", out)
+		}
+		if !strings.Contains(out, "conservation") {
+			t.Errorf("no last run for conservation:\n%s", out)
+		}
+	})
+
+	t.Run("a finding is an error, so a scheduler notices", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, "alter table accounts_volumes disable trigger user"); err != nil {
+			t.Fatal(err)
+		}
+		defer pool.Exec(ctx, "alter table accounts_volumes enable trigger user")
+		if _, err := pool.Exec(ctx,
+			"update accounts_volumes set input = input + 500 where ledger='main' and address='world'"); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := captureOutput(t, func() error { return dispatch(ctx, []string{"verify"}) })
+		if err == nil {
+			t.Fatalf("a broken ledger exited zero:\n%s", out)
+		}
+		// the findings are printed even though the command fails, because the
+		// error is the signal and the output is the diagnosis
+		if !strings.Contains(out, "FAIL") || !strings.Contains(out, "drifted by") {
+			t.Errorf("the finding was not reported:\n%s", out)
+		}
+	})
+
+	t.Run("an unknown flag is a usage error, not a silent default", func(t *testing.T) {
+		err := dispatch(ctx, []string{"verify", "--nonsense"})
+		var u usageErr
+		if !errors.As(err, &u) {
+			t.Errorf("err = %v, want a usage error", err)
+		}
+	})
 }

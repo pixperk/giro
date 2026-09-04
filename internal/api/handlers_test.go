@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -1076,4 +1077,41 @@ func TestBulkPathDoesNotShadowTransactionReads(t *testing.T) {
 	if rec := do(t, s, http.MethodGet, base+"/transactions/bulk", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("GET on the bulk path = %d, want 400 for a non numeric id", rec.Code)
 	}
+}
+
+// The list half of the asset endpoints. Registering returns the whole list
+// because that is the useful answer, and reading it back is how a caller finds
+// out what a ledger it did not set up can handle.
+func TestListAssets(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	var listed []string
+	rec := do(t, s, http.MethodGet, base+"/assets", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(testAssets) {
+		t.Errorf("listed %v, want the %d the harness registered", listed, len(testAssets))
+	}
+
+	// a ledger nobody has set up lists nothing, as an empty array rather than
+	// null: a client ranging over the response should not have to nil check.
+	other := newLedgerWithoutAssets(t, s, "bare")
+	rec = do(t, s, http.MethodGet, other+"/assets", nil)
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("body = %q, want []", body)
+	}
+}
+
+func newLedgerWithoutAssets(t *testing.T, s *Server, name string) string {
+	t.Helper()
+	base := "/v1/ledgers/" + name
+	if rec := do(t, s, http.MethodPost, base, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("creating ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	return base
 }
