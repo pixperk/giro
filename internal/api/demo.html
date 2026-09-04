@@ -387,6 +387,7 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
     <a href="#guards">Guards</a>
     <a href="#recon">Reconciliation</a>
     <a href="#nohttp">No API</a>
+    <a href="#observing">Observing</a>
     <a href="#operating">Operating</a>
     <a href="/docs">Reference &#8599;</a>
   </div>
@@ -691,6 +692,7 @@ tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.<
           <tr><td>migrate</td><td>Applying migrations, and refusing to serve against a schema that does not match.</td></tr>
           <tr><td>fx</td><td>Deriving a conversion's amounts from its rate, so two numbers that must agree become one.</td></tr>
           <tr><td>recon</td><td>Ingesting what a bank or exchange says and pairing it with movements.</td></tr>
+          <tr><td>obs</td><td>OpenTelemetry. A separate module, so the engine keeps one dependency.</td></tr>
         </tbody>
       </table>
     </div>
@@ -899,6 +901,11 @@ tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.<
             <td>Reconciliation needs a <code>Source</code>: something that calls your bank's API and returns normalised lines. That is an interface, and you cannot pass an implementation of one over HTTP. The adapter has to live in a process that can run your code.</td>
           </tr>
           <tr>
+            <td>obs</td>
+            <td><span class="pill lib">library</span></td>
+            <td>Telemetry is an interface the engine hands facts to, and an implementation of an interface cannot travel over HTTP. It is also a separate Go module: OpenTelemetry brings a dependency tree, and the engine having one dependency is a property worth keeping.</td>
+          </tr>
+          <tr>
             <td>fx</td>
             <td><span class="pill lib">library</span></td>
             <td>Not an operation. It builds the two postings a conversion needs from the rate you state, and you commit them through the ordinary transactions endpoint. There is nothing for a route to do.</td>
@@ -936,9 +943,80 @@ tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.<
   </div>
 </section>
 
+<section id="observing">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">08</span>While it runs</p>
+    <h2>Observing it</h2>
+    <p class="lede">The checks below answer &ldquo;is the book sound&rdquo;. This answers &ldquo;how is it behaving right now&rdquo; &mdash; a different question, with a different failure, and neither detects the other.</p>
+
+    <div class="split">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Two lines, and nothing before that</h3>
+        <figure class="code">
+          <figcaption><span class="lang">go</span><span class="where">the whole integration</span></figcaption>
+<pre class="snippet">observer<span class="p">,</span> shutdown<span class="p">,</span> err <span class="p">:=</span> obs<span class="p">.</span><span class="f">Setup</span><span class="p">(</span>ctx<span class="p">,</span> <span class="s">"giro"</span><span class="p">,</span>
+    obs<span class="p">.</span><span class="f">Options</span><span class="p">{</span><span class="k">SlowLock</span><span class="p">:</span> <span class="n">50</span> <span class="p">*</span> time<span class="p">.</span><span class="f">Millisecond</span><span class="p">})</span>
+<span class="k">if</span> err <span class="p">!=</span> <span class="k">nil</span> <span class="p">{</span>
+    <span class="k">return</span> err  <span class="c">// telemetry that silently did not</span>
+                <span class="c">// start is worse than none</span>
+<span class="p">}</span>
+<span class="k">defer</span> <span class="f">shutdown</span><span class="p">(</span>ctx<span class="p">)</span>
+
+store <span class="p">:=</span> storage<span class="p">.</span><span class="f">New</span><span class="p">(</span>pool<span class="p">,</span> <span class="s">"main"</span><span class="p">).</span><span class="f">Observe</span><span class="p">(</span>observer<span class="p">)</span></pre>
+        </figure>
+        <p style="margin-top:1.5rem">An unobserved store computes nothing: the engine holds an interface, checks it for nil, and that is the entire cost of leaving this off.</p>
+        <p>Where the data goes is the standard <code>OTEL_*</code> environment, so giro has no telemetry configuration of its own to learn and <code>none</code> is a real setting.</p>
+        <p class="note">A collector is optional &mdash; the SDK speaks OTLP straight to a backend. giro ships none: it is the upstream binary, already modular through its own builder, and writing another would be the same mistake as shipping an exchange client inside <code>recon</code>.</p>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Spans nest, and that is the point</h3>
+        <figure class="code">
+          <figcaption><span class="lang">trace</span><span class="where">one commit</span></figcaption>
+<pre class="snippet"><span class="f">giro.commit</span>                <span class="c">45ms</span>
+<span class="p">└──</span> <span class="f">giro.commit.attempt</span>    <span class="c">44ms</span>
+    <span class="p">└──</span> <span class="f">giro.lock</span>          <span class="c">40ms</span>  <span class="err">←</span></pre>
+        </figure>
+        <p style="margin-top:1.5rem">That turns &ldquo;the commit took 45ms&rdquo; into &ldquo;40ms of it was waiting on <code>world</code>&rdquo;, which is a different sentence with a different remedy.</p>
+        <p>Every deposit takes a row lock on <code>world</code>, so it is the hottest row in the system by construction &mdash; the wall this design meets first. <code>giro.lock.wait</code> climbing is what says to split it per counterparty. Nothing outside the engine can measure it: from the caller's side a contended commit and a slow one are identical.</p>
+        <p class="note">More than one <code>giro.commit.attempt</code> inside a commit means it lost a deadlock and started again. Sorted lock ordering is supposed to make that impossible, so it is a correctness signal wearing a performance signal's clothes &mdash; page on it.</p>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">A refusal is not an error</h3>
+        <p><code>users:alice cannot spend money she does not have</code> is the ledger working. It gets its own counter and a span event, never an error status.</p>
+        <p>Generic HTTP middleware folds a <code>422</code> into a 4xx error rate, and a correct ledger under ordinary load then looks like a system in trouble &mdash; with the further cost that the day something genuinely breaks, the signal is buried in the noise of customers being short of money.</p>
+        <p>So group by reason, because the reasons have different owners:</p>
+        <table class="surface" style="margin-top:.6rem">
+          <tbody>
+            <tr><td>insufficient_funds</td><td>Product. A rise is a behaviour or pricing change.</td></tr>
+            <tr><td>unknown_asset</td><td>A bug in a caller. Should sit flat at zero.</td></tr>
+            <tr><td>unexpected_credit</td><td>A cost line leaning the wrong way &mdash; a loss booked as a gain. Look at this.</td></tr>
+            <tr><td>contention_exhausted</td><td>Gave up after the retry limit. Page.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">No metric is labelled by an account</h3>
+        <p>A ledger's most natural label is an address, and addresses are unbounded. <code>users:alice</code> as a label is one time series per customer, which is how a metrics backend dies &mdash; discovered in production, usually during the incident the dashboard was built for.</p>
+        <table class="surface" style="margin-top:.6rem">
+          <thead><tr><th></th><th>Goes on</th></tr></thead>
+          <tbody>
+            <tr><td>ledger, asset, reason</td><td>metrics and spans</td></tr>
+            <tr><td>account addresses</td><td>spans only</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1.4rem">A span exists per request rather than per series, so <em>which account was this</em> stays answerable at three in the morning without producing a million time series to answer it. A test walks every emitted metric and fails if an address reached a label; another asserts cardinality is a function of configuration and never of traffic.</p>
+        <p class="note">The consequence worth deciding before it leaves your network: a span attribute now carries customer identifiers. The collector config ships a processor, commented out, that drops them at the boundary &mdash; the trace keeps the shape of the commit and the lock timing, and loses whose money it was.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="operating">
   <div class="wrap">
-    <p class="eyebrow"><span class="no">08</span>Running it</p>
+    <p class="eyebrow"><span class="no">09</span>Running it</p>
     <h2>Operating</h2>
     <p class="lede">Seven checks, none on the write path, each reporting what it examined. Two more run when you say what counts as stale, because neither window has a default anyone else can choose for you.</p>
 

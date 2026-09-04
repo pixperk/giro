@@ -26,6 +26,13 @@ type Store struct {
 	// a rising count means the ordering has been broken somewhere.
 	retries atomic.Int64
 
+	// where telemetry goes, or nil. see observer.go: nothing is computed when
+	// it is nil, so an unobserved store pays for one comparison per event.
+	obs Observer
+
+	// where spans go, or nil. usually the same object as obs; see Observe.
+	tracer Tracer
+
 	// test seam, called after volumes are locked and before they are applied.
 	//
 	// it exists because the write path serialises on other row locks anyway,

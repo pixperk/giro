@@ -1,0 +1,92 @@
+# An OpenTelemetry Collector configuration for giro.
+#
+# This is configuration, not a component. The collector is the upstream binary
+# (otelcol, otelcol-contrib, or a distribution built with ocb) and giro does
+# not ship one: it is mature, security sensitive, high throughput
+# infrastructure with a large community behind it, and writing another would be
+# the same mistake as shipping an exchange client inside recon.
+#
+# It is also optional. giro speaks OTLP directly to any backend that accepts
+# it, which is enough for development:
+#
+#   OTEL_EXPORTER_OTLP_ENDPOINT=https://your-backend:4317 giro-embedded-app
+#
+# A collector earns its place in production by letting the application hand
+# data off quickly, and by being the one place batching, retries and redaction
+# are configured rather than a setting in every service.
+#
+# If you want a smaller binary with only these components in it, that is what
+# the upstream builder is for -- a manifest naming exactly these receivers,
+# processors and exporters, compiled to one binary with nothing else in it.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # the reason to run a collector at all: the application hands off and moves
+  # on, and this absorbs the batching so a commit never waits on a backend
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # a hard stop rather than a suggestion. if the backend slows down, this
+  # refuses data instead of growing until the collector is OOM killed and takes
+  # every signal with it
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+
+  # Account addresses reach spans, never metrics -- see obs/README.md. That is
+  # the right split, but it means a span attribute carries customer
+  # identifiers, so decide deliberately whether they leave your network.
+  #
+  # Uncomment to drop them at the boundary. The trace still shows the shape of
+  # the commit and how long the lock took; it stops telling you whose money it
+  # was.
+  #
+  # attributes/redact:
+  #   actions:
+  #     - key: giro.addresses
+  #       action: delete
+  #     - key: giro.accounts
+  #       action: delete
+  #     - key: giro.account
+  #       action: delete
+
+exporters:
+  # replace with your backend. otlphttp/otlp is the portable choice.
+  otlp:
+    endpoint: your-backend:4317
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    # a queue, so a backend restart does not lose the window it was down for
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+  # while you are setting this up, this shows what actually arrived
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp]
+    traces:
+      receivers: [otlp]
+      # add attributes/redact here if you enabled it above
+      processors: [memory_limiter, batch]
+      exporters: [otlp]
+
+  telemetry:
+    logs:
+      level: info

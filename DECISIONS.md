@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability.
 
 ---
 
@@ -1192,3 +1192,79 @@ What actually catches a misconfigured deployment is the boot check: `giro serve`
 asks the database whether the connection it was handed can disable its own
 guards, and says so if it can. That works whatever the variable is called, and
 it is the check worth having.
+
+---
+
+### D53. Observability inverts the layering, and addresses are never labels
+
+`fx` and `recon` are layers above the engine, and the compiler enforces that
+the engine cannot import them (D32). Observability cannot be that shape: it has
+to see inside the commit path, and the commit path is the engine.
+
+So it inverts. `storage` declares the narrowest thing it needs — `Observer`,
+somewhere to hand facts — and every decision about what those facts become is
+made outside it. Nil by default, and nothing is computed when it is nil, so an
+unobserved store pays one comparison per event and no allocation.
+
+The OpenTelemetry adapter is a **separate Go module**. `go get
+github.com/pixperk/giro` still brings one direct dependency, and telemetry is a
+second `go get` for those who want it. That keeps a framework out of the
+dependency graph *and* out of the test suite of the code that moves money,
+which matters more here than it would elsewhere.
+
+**Cardinality is the design constraint, not an afterthought.** A ledger's most
+natural label is an account address, and addresses are unbounded: labelling a
+metric `users:alice` produces one time series per customer. That is discovered
+in production, usually during the incident the dashboard was built for. So the
+split is structural — ledger, asset and reason are metric labels; addresses go
+on spans, where one exists per request rather than per series. A test asserts
+that no metric carries an address, and another asserts that cardinality is a
+function of configuration rather than of traffic.
+
+**A refusal is not an error.** "users:alice cannot spend money she does not
+have" is the ledger working, so it gets its own counter and a span event, never
+`codes.Error`. Generic HTTP middleware folds a 422 into a 4xx error rate, and a
+correct ledger under ordinary load then looks like a system in trouble — with
+the further cost that a real failure is buried in the noise of customers being
+short of money. The reason is a label because the reasons have different owners:
+`insufficient_funds` is a product event, `unknown_asset` is a bug in a caller.
+
+**Lock wait is the signal with no substitute.** Every deposit takes a row lock
+on `world`, which makes it the hottest row in the system by construction — the
+wall this model runs into first (D14). From outside the engine a contended
+commit and a slow one are indistinguishable, so only the engine can measure it,
+and the number is what says when to split `world` per counterparty.
+
+Two consequences, both accepted. The shipped `giro serve` emits nothing, because
+the core module cannot import the adapter without taking on what the split
+exists to avoid; telemetry is for the embedded case, which is how giro is meant
+to run in production anyway. And an `Observer` is called on the commit path, so
+an implementation that blocks has made every transaction wait for a metrics
+backend.
+
+**Spans are a second interface, because they are a different shape.** `Observer`
+is told what happened after it happened, which is all a counter needs. A span
+has to exist *while* the work runs and hand back a context so the next one
+nests, so `Tracer` asks for a scope rather than a notification. Three levels:
+`giro.commit` is what a caller waited for, `giro.commit.attempt` is one pass
+through the database transaction, `giro.lock` is the row locking statement.
+That nesting is the whole value — it turns "the commit took 45ms" into "40ms of
+it was waiting on world", which is a different sentence with a different
+remedy. It is optional and checked once at wiring time, so an Observer that
+only counts things need not implement it.
+
+**No collector is built here, and none is required.** The SDK speaks OTLP
+directly to any backend that accepts one, which is enough for development; a
+collector earns its place in production by absorbing batching and retries and
+being the one place redaction is configured. But it is the upstream binary. It
+is mature, security sensitive, high throughput infrastructure with a large
+community behind it, and writing another would be the same mistake as shipping
+an exchange client inside `recon` — and it is already modular, which is usually
+the reason people reach for building one: the upstream builder takes a manifest
+naming exactly the components you want and compiles a binary with those and
+nothing else. `deploy/otel-collector.yaml` is configuration for it.
+
+Selection is delegated to the standard `OTEL_*` environment variables rather
+than to configuration of giro's own, so there is no second vocabulary to learn
+and `none` is a real setting — telemetry can be switched off in an environment
+without deleting the wiring that would otherwise rot while it was disabled.

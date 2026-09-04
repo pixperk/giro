@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -53,41 +54,160 @@ const maxAttempts = 10
 // balances that were checked, so recovery means starting again from the lock
 // rather than replaying a statement.
 func (s *Store) CommitTransaction(ctx context.Context, p ledger.Postings, opts CommitOptions) (*ledger.Transaction, error) {
+	// started before the validation returns rather than after them: those are
+	// refusals too, and a refusal that happens to be cheap to detect is still
+	// one a caller was told no. leaving them out would mean the refusal rate
+	// silently excluded every malformed request.
+	started := time.Now()
+
+	// the outermost span covers retries and the backoff between them, so its
+	// duration is what the caller waited rather than what the last attempt took
+	ctx, endCommit := s.start(ctx, SpanCommit)
+	var outcome error
+	defer func() { endCommit(outcome) }()
+
 	if len(p) == 0 {
-		return nil, ErrNoPostings
+		outcome = s.refuse(ctx, started, ErrNoPostings)
+		return nil, outcome
 	}
 	if i, err := p.Validate(); err != nil {
-		return nil, &PostingError{Index: i, Err: err}
+		outcome = s.refuse(ctx, started, &PostingError{Index: i, Err: err})
+		return nil, outcome
 	}
 	// before the retry loop: an unregistered asset is not a contention
 	// problem, and retrying it ten times with backoff would only make the
 	// answer slower.
 	if err := s.checkAssets(ctx, p); err != nil {
-		return nil, err
+		outcome = s.refuse(ctx, started, err)
+		return nil, outcome
 	}
 
 	ikHash, err := idempotencyHash(p, opts)
 	if err != nil {
-		return nil, err
+		outcome = err
+		return nil, outcome
 	}
 
 	for attempt := range maxAttempts {
 		tx, err := s.commitOnce(ctx, p, opts, ikHash, attempt)
 		if err == nil {
+			s.observeCommitted(ctx, tx, p, attempt+1, time.Since(started))
 			return tx, nil
 		}
 		if !retryable(err) {
-			return nil, err
+			outcome = s.refuse(ctx, started, err)
+			return nil, outcome
 		}
+
 		s.retries.Add(1)
+		s.observeContention(ctx, Contention{
+			Attempt: attempt, Restarted: true, Waited: time.Since(started),
+		})
 		if err := backoff(ctx, attempt); err != nil {
-			return nil, err
+			outcome = err
+			return nil, outcome
 		}
 	}
-	return nil, fmt.Errorf("giving up after %d attempts, contention on ledger %q", maxAttempts, s.ledger)
+	s.observeRefusal(ctx, Refusal{Reason: CauseContentionGiveUp, Took: time.Since(started)})
+	outcome = fmt.Errorf("giving up after %d attempts, contention on ledger %q", maxAttempts, s.ledger)
+	return nil, outcome
 }
 
-func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOptions, ikHash string, attempt int) (*ledger.Transaction, error) {
+// refuse reports a declined transaction and returns the error unchanged, so a
+// call site stays one line and cannot report one error while returning
+// another.
+//
+// A refusal and a broken connection are different things and must not share a
+// series: CauseOf decides which this was, and anything it does not recognise
+// is passed through unreported rather than being filed as the ledger saying
+// no.
+func (s *Store) refuse(ctx context.Context, started time.Time, err error) error {
+	if cause, refused := CauseOf(err); refused {
+		s.observeRefusal(ctx, Refusal{
+			Reason:  cause,
+			Asset:   assetOf(err),
+			Account: accountOf(err),
+			Took:    time.Since(started),
+		})
+	}
+	return err
+}
+
+// observeCommitted assembles the event only when somebody is listening: the
+// deduplication below allocates, and an unobserved commit must not pay for it.
+func (s *Store) observeCommitted(ctx context.Context, tx *ledger.Transaction, p ledger.Postings, attempts int, took time.Duration) {
+	if !s.observing() {
+		return
+	}
+	var (
+		assets    []ledger.Asset
+		addresses []ledger.Address
+		seenA     = map[ledger.Asset]bool{}
+		seenAddr  = map[ledger.Address]bool{}
+	)
+	for _, posting := range p {
+		if !seenA[posting.Asset] {
+			seenA[posting.Asset] = true
+			assets = append(assets, posting.Asset)
+		}
+		for _, a := range [...]ledger.Address{posting.Source, posting.Destination} {
+			if !seenAddr[a] {
+				seenAddr[a] = true
+				addresses = append(addresses, a)
+			}
+		}
+	}
+	s.observeCommit(ctx, Commit{
+		Assets:    assets,
+		Postings:  len(p),
+		Accounts:  len(addresses),
+		Attempts:  attempts,
+		Took:      took,
+		Addresses: addresses,
+	})
+}
+
+// assetOf and accountOf pull the two fields worth reporting out of a refusal.
+// They are here rather than on the error types because they exist for
+// telemetry, and an error's job is to explain itself to a person.
+func assetOf(err error) ledger.Asset {
+	var (
+		funds  *InsufficientFundsError
+		credit *UnexpectedCreditError
+		asset  *UnknownAssetError
+	)
+	switch {
+	case errors.As(err, &funds):
+		return funds.Asset
+	case errors.As(err, &credit):
+		return credit.Asset
+	case errors.As(err, &asset):
+		return asset.Asset
+	}
+	return ""
+}
+
+func accountOf(err error) ledger.Address {
+	var (
+		funds  *InsufficientFundsError
+		credit *UnexpectedCreditError
+		closed *AccountClosedError
+	)
+	switch {
+	case errors.As(err, &funds):
+		return funds.Account
+	case errors.As(err, &credit):
+		return credit.Account
+	case errors.As(err, &closed):
+		return closed.Account
+	}
+	return ""
+}
+
+func (s *Store) commitOnce(ctx context.Context, p ledger.Postings, opts CommitOptions, ikHash string, attempt int) (_ *ledger.Transaction, err error) {
+	ctx, end := s.start(ctx, SpanAttempt)
+	defer func() { end(err) }()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin: %w", err)

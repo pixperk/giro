@@ -47,14 +47,19 @@ serve:
 
 # --- development ------------------------------------------------------------
 
-# run every test with the race detector
+# run every test with the race detector.
+#
+# obs is a separate module, so ./... does not reach it. a nested module that
+# nothing runs is one that compiles against a version of the engine it has not
+# seen in months.
 test:
     go test -race ./...
+    cd obs && go test -race ./...
 
 # the suite as the restricted application role, which is how it runs in
-# production. everything that is an application path must pass. the six that
-# skip are the ones that have to damage the book to prove the damage is
-# noticed, and under this role they cannot stage their attack.
+# production. everything that is an application path must pass. the ones that
+# skip are those that have to damage the book to prove the damage is noticed,
+# and under this role they cannot stage their attack.
 test-restricted:
     GIRO_TEST_ROLE=giro_app go test -race ./storage/
 
@@ -86,6 +91,7 @@ fmt:
 
 vet:
     go vet ./...
+    @cd obs && go vet ./...
 
 # needs golangci-lint, brew install golangci-lint
 lint:

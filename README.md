@@ -23,7 +23,8 @@ tx, err := store.CommitTransaction(ctx, ledger.Postings{
 - **Nine checks** you can schedule, each of which reports what it examined.
   Seven run unconditionally; two more need the window you consider stale.
 
-One direct dependency: the Postgres driver.
+One direct dependency: the Postgres driver. Telemetry lives in
+[a separate module](obs/) so that stays true.
 
 ---
 
@@ -174,6 +175,7 @@ direction: the engine cannot import them.
 | [`recon`](recon/README.md) | Reconciling against banks, exchanges and chains — [API](recon/API.md) |
 | `fx` | Deriving a conversion's amounts from its rate |
 | `migrate` | Applying and checking migrations |
+| [`obs`](obs/) | OpenTelemetry. A separate module, so the engine keeps one dependency |
 
 ---
 ## What it is
@@ -440,6 +442,78 @@ other check reads the projection, so a consistent lie passes them all.
 
 ---
 
+## Observability
+
+Nothing is emitted until you ask for it. The engine declares an interface and
+computes nothing when it is unset; the OpenTelemetry adapter is
+[a separate module](obs/), so `go get github.com/pixperk/giro` still brings one
+direct dependency.
+
+```bash
+go get github.com/pixperk/giro/obs
+```
+
+```go
+observer, shutdown, err := obs.Setup(ctx, "giro", obs.Options{
+    SlowLock: 50 * time.Millisecond,
+})
+if err != nil {
+    return err     // telemetry that silently did not start is worse than none
+}
+defer shutdown(ctx)
+
+store := storage.New(pool, "main").Observe(observer)
+```
+
+That is the whole integration. Where the data goes is decided by the standard
+`OTEL_*` environment variables — `OTEL_EXPORTER_OTLP_ENDPOINT` and friends — so
+giro has no telemetry configuration of its own to learn, and `none` is a real
+setting.
+
+**A collector is optional, and giro does not ship one.** The SDK speaks OTLP
+straight to any backend that accepts it; a collector earns its place in
+production by absorbing batching and retries and being the one place redaction
+is configured. But it is the upstream binary — mature, security sensitive, and
+already modular through its own builder — and writing another would be the same
+mistake as shipping an exchange client inside [`recon`](recon/).
+[`deploy/otel-collector.yaml`](deploy/otel-collector.yaml) is a starting config.
+
+### Three things worth knowing before you build a dashboard
+
+**A refusal is not an error.** `users:alice cannot spend money she does not
+have` is the ledger working. It gets its own counter and a span event, never an
+error status. Generic HTTP middleware folds a `422` into a 4xx error rate, and
+a correct ledger under ordinary load then looks like a system in trouble — with
+the further cost that a real failure is buried in the noise. Group
+`giro.refusals` by `giro.reason`: `insufficient_funds` is a product event,
+`unknown_asset` is a bug in a caller and should sit flat at zero.
+
+**No metric is labelled by account address.** Addresses are unbounded, so one
+would mean a time series per customer. Ledger, asset and reason are labels;
+addresses go on spans, where one exists per request rather than per series. A
+test enforces it, and another asserts cardinality is a function of your
+configuration rather than of your traffic.
+
+**Spans nest, and that is the point.**
+
+```
+giro.commit                 what the caller waited for, retries included
+└── giro.commit.attempt     one pass through the database transaction
+    └── giro.lock           the row locking statement
+```
+
+It turns *"the commit took 45ms"* into *"40ms of it was waiting on `world`"*,
+which is a different sentence with a different remedy. Every deposit takes a
+row lock on `world`, making it the hottest row in the system by construction,
+and `giro.lock.wait` climbing is what says when to split it per counterparty.
+Nothing outside the engine can measure that: from the caller's side a contended
+commit and a slow one are identical.
+
+[obs/](obs/) has the metric catalogue with its cardinality, the refusal
+taxonomy with who owns each reason, and what to alert on.
+
+---
+
 ## The three roles
 
 Every invariant in giro is a Postgres trigger or constraint, and **a table's
@@ -509,6 +583,8 @@ deployment.
 | | |
 |---|---|
 | [deploy/](deploy/) | Scheduling the checks: cron, systemd, Kubernetes, and what to page on |
+| [obs/](obs/) | OpenTelemetry, as a separate module. What to alert on, and why a refusal is not an error. |
+| [deploy/otel-collector.yaml](deploy/otel-collector.yaml) | A starting collector config, including the redaction question |
 | `giro verify` | Seven checks, nine with `--stale-after` and `--recon-after`. Exits non-zero on a finding. |
 | `giro verify --last --max-age=25h` | Fails if a check has stopped running |
 | `giro account` | Account bounds and closure. No endpoint, by design. |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -93,7 +94,15 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 		return nil, fmt.Errorf("materialise volume rows: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, `
+	// timed because this statement is where a commit waits. it is the only
+	// place that can measure it: from outside the engine a contended commit
+	// and a slow one are the same slow request. see Contention in observer.go
+	// for why the hot row is worth naming.
+	lockStart := time.Now()
+	// its own span, because "was it the lock?" is the first question worth
+	// asking about a slow commit and a flat span cannot answer it
+	lockCtx, endLock := s.start(ctx, SpanLock)
+	rows, err := tx.Query(lockCtx, `
 		select address, asset, input, output, allow_negative, allow_positive
 		from accounts_volumes
 		where ledger = $1
@@ -101,10 +110,18 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 		order by address, asset
 		for update`,
 		s.ledger, addresses, assets)
+	endLock(err)
 	if err != nil {
 		return nil, fmt.Errorf("lock volume rows: %w", err)
 	}
 	defer rows.Close()
+	if s.observing() {
+		locked := make([]ledger.Address, len(addresses))
+		for i, a := range addresses {
+			locked[i] = ledger.Address(a)
+		}
+		s.observeContention(ctx, Contention{Waited: time.Since(lockStart), Accounts: locked})
+	}
 
 	current := make(map[key]locked, len(updates))
 	for rows.Next() {

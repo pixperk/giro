@@ -194,6 +194,69 @@ giro still needs some path to a shell — a task runner, a job, a release step.
 
 ---
 
+## Telemetry, and what it does not cover
+
+`giro verify` answers "is the book sound". It says nothing about how the ledger
+is behaving right now, and the two failure modes are different: a wrong book is
+a correctness problem, a contended one is a capacity problem, and neither
+detects the other.
+
+[`obs`](../obs/) is the second half — a separate Go module, so the engine keeps
+one direct dependency:
+
+```go
+observer, shutdown, err := obs.Setup(ctx, "giro", obs.Options{
+    SlowLock: 50 * time.Millisecond,
+})
+if err != nil {
+    return err
+}
+defer shutdown(ctx)
+
+store := storage.New(pool, "main").Observe(observer)
+```
+
+Where it goes is the standard OpenTelemetry environment, not configuration of
+giro's:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_METRICS_EXPORTER=otlp     # or prometheus, console, none
+OTEL_TRACES_EXPORTER=otlp      # or console, none
+```
+
+`none` is a real setting, so an environment can run without telemetry rather
+than without the wiring.
+
+**A collector is optional.** The SDK speaks OTLP straight to a backend, which
+is enough for development. In production one earns its place by letting the
+application hand data off quickly and by being the single place batching,
+retries and redaction are configured.
+[`otel-collector.yaml`](otel-collector.yaml) here is a starting configuration
+for the upstream binary — giro ships no collector, and if you want one carrying
+only the components you use, that is what the upstream builder is for.
+
+**One thing to decide before this leaves your network.** Account addresses are
+deliberately on spans and never on metrics, which is the right split for
+cardinality — but it does mean a span attribute carries customer identifiers.
+The collector config has a commented-out processor that drops them at the
+boundary; the trace still shows the shape of the commit and how long the lock
+took.
+
+### Two alerts that only telemetry can give you
+
+| Signal | Means | |
+|---|---|---|
+| `giro.commit.restarts > 0` | A commit lost a deadlock. Sorted lock ordering is supposed to make that impossible, so this is a correctness signal wearing a performance signal's clothes. | **Page.** |
+| `giro.refusals{reason="contention_exhausted"} > 0` | A transaction gave up after the retry limit. A caller was told no for a reason unrelated to their money. | **Page.** |
+| `giro.lock.wait` p99 climbing | `world` is the hottest row by construction — every deposit locks it. This is the number that says when to split it per counterparty. | Capacity planning, not a page. |
+
+Do **not** alert on the refusal rate as a whole. Most of it is
+`insufficient_funds`, which is the ledger working.
+
+---
+
 ## What to page on, and what to look at in the morning
 
 | Check | A finding means | When |
