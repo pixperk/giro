@@ -257,9 +257,17 @@ func TestReconciliationEvidenceIsAppendOnly(t *testing.T) {
 	fund(t, ctx, s, "users:alice", 10_000)
 	stageOneRecord(t, ctx, pool)
 
+	// a match names the move it paired with, not the transaction: a statement
+	// line is one account, one asset, one amount, one direction, and that is
+	// what a move is
+	var seq int64
+	if err := pool.QueryRow(ctx,
+		"select seq from moves where ledger='main' order by seq limit 1").Scan(&seq); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `
-		insert into recon_matches (ledger, source, record_id, transaction_id, variance, rule)
-		values ('main', 'kraken', 'L1', 1, 0, 'exact_ref')`); err != nil {
+		insert into recon_matches (ledger, source, record_id, move_seq, variance, rule)
+		values ('main', 'kraken', 'L1', $1, 0, 'exact_ref')`, seq); err != nil {
 		t.Fatal(err)
 	}
 

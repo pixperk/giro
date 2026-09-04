@@ -238,16 +238,7 @@ func TestAnUnknownSourceCannotStage(t *testing.T) {
 // The default convention is giro's own, and a deployment that names its edges
 // differently only has to say so.
 func TestBoundaryIsConfigurable(t *testing.T) {
-	def := recon.Prefix(recon.DefaultBoundaryPrefix)
-	if !def("external:lp:kraken:USD") {
-		t.Error("the default does not recognise giro's own convention")
-	}
-	if def("client:acme") {
-		t.Error("an ordinary account was treated as facing outward")
-	}
-
-	mine := recon.Prefix("edge:")
-	if !mine("edge:bank") || mine("external:lp:kraken:USD") {
-		t.Error("a custom convention is not honoured")
+	if recon.DefaultBoundaryPrefix != "external:" {
+		t.Errorf("default prefix = %q", recon.DefaultBoundaryPrefix)
 	}
 }

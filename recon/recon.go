@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/pixperk/giro/ledger"
@@ -112,40 +111,60 @@ type Source interface {
 	Fetch(ctx context.Context, since time.Time) ([]Record, error)
 }
 
-// Boundary reports whether an address faces outward, and it is configuration
-// rather than something the ledger knows.
-//
-// Matching needs it so that a line saying "money in" pairs with a movement
-// that came in. Without it an outbound wire reconciles against an inbound
-// movement of the same size and reference, which is a real mistake and an easy
-// one.
-//
-// The ledger deliberately has no opinion about what an address means, so the
-// convention is passed in. giro's own is external:, and it is the default,
-// but a deployment that names its edges differently only has to say so.
-type Boundary func(ledger.Address) bool
-
-// Prefix is the usual Boundary: an address facing outward is named for the
-// counterparty it faces.
-func Prefix(p string) Boundary {
-	return func(a ledger.Address) bool { return strings.HasPrefix(string(a), p) }
-}
-
-// DefaultBoundaryPrefix is giro's own convention. An account per counterparty
+// DefaultBoundaryPrefix is giro's own convention: an account per counterparty
 // and asset -- external:lp:kraken:USD -- so each one's balance is directly
 // comparable to that counterparty's own statement.
 const DefaultBoundaryPrefix = "external:"
 
+// ExternalRefKey is where a transaction records the reference its counterparty
+// will use for it.
+//
+// A transaction's Reference is unique per ledger, which is right for an
+// identifier and wrong for a match key: one bank line often pays several
+// transactions, and they need to share the reference it will arrive under.
+// So the shared key lives in metadata and the unique one stays unique.
+//
+// Matching accepts either, because a payment with only one transaction behind
+// it has no reason to carry the same string twice.
+const ExternalRefKey = "giro/external.ref"
+
 // Config is how a deployment says what its conventions are. The zero value
 // works and assumes giro's.
 type Config struct {
-	// Boundary decides which addresses face outward. Nil means
-	// Prefix(DefaultBoundaryPrefix).
-	Boundary Boundary
+	// BoundaryPrefix names the addresses that face outward. Empty means
+	// DefaultBoundaryPrefix.
+	//
+	// A prefix rather than a predicate, and that is a concession worth being
+	// honest about. Matching runs in the database, so a Go function could not
+	// take part in it, and offering one that silently did not apply would be
+	// worse than a narrower knob that does.
+	//
+	// It is needed because a line saying "money in" must pair with a movement
+	// that came in. Without it an outbound wire reconciles against an inbound
+	// movement of the same size and reference, which is a real mistake and an
+	// easy one.
+	BoundaryPrefix string
 
-	// Tolerance is how far a line's amount may sit from the movement it is
-	// paired with and still count as matched rather than as a variance, in
-	// minor units. Zero means exact, which is the right default: a bank that
-	// is a penny out is telling you something.
+	// Tolerance is how far a line's amount may sit from the movement it pairs
+	// with and still count as matched rather than as a variance, in minor
+	// units.
+	//
+	// Zero is the default and the right one: a bank that is a penny out is
+	// telling you something. Widening it is a decision about one source, not a
+	// convenience.
 	Tolerance *big.Int
+}
+
+func (c Config) boundaryPrefix() string {
+	if c.BoundaryPrefix == "" {
+		return DefaultBoundaryPrefix
+	}
+	return c.BoundaryPrefix
+}
+
+func (c Config) tolerance() *big.Int {
+	if c.Tolerance == nil {
+		return new(big.Int)
+	}
+	return c.Tolerance
 }
