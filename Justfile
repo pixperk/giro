@@ -54,6 +54,25 @@ serve:
 load DURATION="5s":
     @GIRO_LOAD={{ DURATION }} go test -run TestLoad -v -timeout 30m ./storage/
 
+# hunt for a fault-injection failure across N random seeds.
+#
+# the ordinary suite already runs these once with a random seed, which is the
+# point: a red build hands you the seed to replay. this is for going looking.
+chaos COUNT="25":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for i in $(seq 1 {{ COUNT }}); do
+      seed=$RANDOM$RANDOM
+      if ! GIRO_CHAOS_SEED=$seed go test -count=1 -run TestChaos ./storage/ >/tmp/chaos.log 2>&1; then
+        echo "FAILED with seed $seed — replay:"
+        echo "  GIRO_CHAOS_SEED=$seed go test -run TestChaos -v ./storage/"
+        cat /tmp/chaos.log
+        exit 1
+      fi
+      printf '.'
+    done
+    echo " {{ COUNT }} seeds, no failures"
+
 # the per-operation benchmarks, which answer a different question to the above:
 # what one commit costs with nothing else happening.
 bench COUNT="200x":

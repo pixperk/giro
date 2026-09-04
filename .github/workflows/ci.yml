@@ -91,6 +91,18 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # The fault-injection tests above ran once with a random seed, which is
+      # the intent: a failure here is a real bug and the log carries the seed
+      # to replay it. This is a second, wider sweep -- cheap, and the class of
+      # bug it looks for is the class that loses money.
+      - name: fault injection sweep
+        run: |
+          for i in $(seq 1 15); do
+            seed=$RANDOM$RANDOM
+            GIRO_CHAOS_SEED=$seed go test -count=1 -run TestChaos ./storage/ \
+              || { echo "::error::fault injection failed, replay with GIRO_CHAOS_SEED=$seed"; exit 1; }
+          done
+
       # obs is a separate module, so ./... above does not reach it. a nested
       # module nothing runs is one that quietly compiles against a version of
       # the engine it has not seen in months, and finds out at a release.

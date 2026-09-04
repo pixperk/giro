@@ -51,7 +51,9 @@ type VolumeUpdate struct {
 // the result must be sorted by account then asset. that ordering is the lock
 // order used at commit time, and taking locks in a globally consistent order
 // is what makes deadlock structurally impossible rather than merely unlikely.
-func (p Postings) VolumeUpdates() []VolumeUpdate {
+// A nil Amount is an error rather than a panic, for the reason given on
+// Reverse: this package is embedded, and a panic takes the host down.
+func (p Postings) VolumeUpdates() ([]VolumeUpdate, error) {
 	type key struct {
 		account Address
 		asset   Asset
@@ -86,7 +88,7 @@ func (p Postings) VolumeUpdates() []VolumeUpdate {
 			amount = new(big.Int)
 		}
 		if amount == nil {
-			panic(fmt.Sprintf("ledger: postings[%d] has nil amount, call Validate first", i))
+			return nil, fmt.Errorf("%w: postings[%d] has a nil amount", ErrNilAmount, i)
 		}
 
 		// a self posting resolves to the same entry twice, so both counters
@@ -111,5 +113,5 @@ func (p Postings) VolumeUpdates() []VolumeUpdate {
 			cmp.Compare(a.Asset, b.Asset),
 		)
 	})
-	return updates
+	return updates, nil
 }

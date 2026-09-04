@@ -77,7 +77,11 @@ func (s *Store) revertOnce(ctx context.Context, id int64, opts RevertOptions) (*
 	// order matters: keeping it would pay the first account back before the
 	// last had returned anything, so an intermediate account dips negative and
 	// a reversal that should succeed fails its balance check.
-	reversal, alloc, err := s.applyTransaction(ctx, tx, original.Postings.Reverse(), applyOptions{
+	inverse, err := original.Postings.Reverse()
+	if err != nil {
+		return nil, err
+	}
+	reversal, alloc, err := s.applyTransaction(ctx, tx, inverse, applyOptions{
 		Timestamp: timestamp,
 		Metadata:  ledger.Metadata{ledger.RevertsKey: strconv.FormatInt(id, 10)},
 	})

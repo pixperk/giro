@@ -277,11 +277,17 @@ type applyOptions struct {
 // it takes an open transaction rather than starting one, because a revert
 // needs to do all of this and then stamp the original row, all atomically.
 func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postings, opts applyOptions) (*ledger.Transaction, allocation, error) {
+	var alloc allocation
+
 	// already sorted by (account, asset) in the domain layer. that ordering is
 	// the lock order, and it is deterministic across processes.
-	updates := p.VolumeUpdates()
-
-	var alloc allocation
+	//
+	// Validate ran before the retry loop, so this cannot fail. Handled rather
+	// than ignored because "cannot fail" is a claim about today's call order.
+	updates, err := p.VolumeUpdates()
+	if err != nil {
+		return nil, alloc, err
+	}
 
 	before, err := s.lockVolumes(ctx, tx, updates)
 	if err != nil {
@@ -300,7 +306,9 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 		if p, err = resolveUpTo(p, before); err != nil {
 			return nil, alloc, err
 		}
-		updates = p.VolumeUpdates()
+		if updates, err = p.VolumeUpdates(); err != nil {
+			return nil, alloc, err
+		}
 	}
 
 	if err := checkClosed(before, updates); err != nil {

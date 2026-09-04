@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining, D58 the hot account.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining, D58 the hot account, D59–D60 failure.
 
 ---
 
@@ -1532,3 +1532,63 @@ handles.
 The guidance, therefore: when `giro.lock.wait` climbs, look at which account is
 in the span and split it by counterparty. If that is not possible, the honest
 answer is more ledgers, not more stripes.
+
+---
+
+### D59. Faults are injected, because the interesting failures cannot be called
+
+Every other test asks whether the code is right when the machinery works. The
+failures that lose money are the other kind: the connection dies between the
+lock and the commit, Postgres kills the backend, the caller's deadline expires
+while the server is still deciding. None can be provoked by calling a function.
+
+So they are injected. A `net.Conn` wrapper handed to pgx through `DialFunc`
+counts writes and severs the socket at an armed one, `pg_terminate_backend`
+kills the backend from a second connection, and short deadlines cut a commit
+off mid-flight. The schedule comes from a seed, printed on every run, so a red
+build replays exactly: `GIRO_CHAOS_SEED=1738 go test -run TestChaos ./storage/`.
+
+This is not deterministic simulation testing in the FoundationDB sense. That
+needs control of the disk and the network, which here belong to Postgres rather
+than to us, and buying it would mean not using Postgres. What it does control
+is when the *client* dies, which is where the interesting half of the
+ambiguity lives.
+
+Every iteration ends by asserting the ledger is indistinguishable from one that
+was never touched: conservation, the hash chain, the projection, transactions
+and log entries in step, and the id counter equal to the number of entries --
+because a counter ahead of them means an allocation escaped its own rollback.
+
+**The test that decides whether money is safe** is the one about the window
+that cannot be closed. A connection severed after the server committed but
+before the client heard leaves the caller unable to tell what happened. That is
+a property of networks, not a bug; what can be engineered is the remedy. So:
+kill the connection at a random point, then retry under the same idempotency
+key, and assert exactly one transaction exists and the balance moved once. The
+mechanism was built for network retries (D22) and had never been tested against
+an actual severed connection.
+
+Twenty-five random seeds, and the fifteen CI runs on every push, found nothing.
+That is the correct outcome and also the least interesting one -- the value is
+that the next change to the commit path will be tested against a class of
+failure that used to be reasoned about instead.
+
+### D60. A library that panics takes its host down
+
+`Postings.Reverse` and `Postings.VolumeUpdates` panicked on a nil amount,
+documented as a programmer error and unreachable through `storage` because
+`Validate` runs first.
+
+Both are exported, and giro's distinguishing feature is being embeddable -- the
+ledger write and the business write in one transaction, in the caller's
+process. A panic there is not a stack trace in giro's logs, it is the host
+application going down. "Call Validate first" is a reasonable contract and a
+poor thing to enforce with a crash.
+
+Both now return `ErrNilAmount`. Zero was never an option: a missing amount is a
+malformed request, not a transfer of nothing, and coercing it would commit a
+no-op that looks like success. Internal callers handle an error that cannot
+happen today, which is the right way to hold a claim that depends on call
+order.
+
+There are now no panics anywhere in the library packages.

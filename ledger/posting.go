@@ -115,14 +115,23 @@ func (p Postings) Validate() (int, error) {
 // B pays A before C has paid B, so B dips negative mid transaction and a
 // reversal that should succeed fails its balance check.
 //
-// panics on a nil Amount rather than treating it as zero. a missing amount is
-// a malformed request, not a transfer of nothing, and coercing it would commit
-// a no-op that looks like success.
-func (p Postings) Reverse() Postings {
+// A nil Amount is an error rather than zero, and an error rather than a panic.
+//
+// Zero would commit a no-op that looks like success, which is the worse of the
+// two silent outcomes. A panic would be the worse of the two loud ones: this
+// package is meant to be embedded, and a library that panics on malformed
+// input takes its host process down with it. Callers inside giro have run
+// Validate first, so they handle an error that cannot happen; a caller outside
+// giro gets told rather than killed.
+// ErrNilAmount is returned rather than panicking, so that a malformed posting
+// reaching an embedded ledger is an error its host can handle.
+var ErrNilAmount = errors.New("posting has a nil amount")
+
+func (p Postings) Reverse() (Postings, error) {
 	rev := make(Postings, len(p))
 	for i, posting := range p {
 		if posting.Amount == nil {
-			panic(fmt.Sprintf("ledger: postings[%d] has nil amount, call Validate first", i))
+			return nil, fmt.Errorf("%w: postings[%d] has a nil amount", ErrNilAmount, i)
 		}
 		rev[len(p)-1-i] = Posting{
 			Source:      posting.Destination,
@@ -131,5 +140,5 @@ func (p Postings) Reverse() Postings {
 			Amount:      new(big.Int).Set(posting.Amount),
 		}
 	}
-	return rev
+	return rev, nil
 }

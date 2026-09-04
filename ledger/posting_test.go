@@ -115,7 +115,7 @@ func TestPostingsValidate(t *testing.T) {
 
 func TestPostingsReverse(t *testing.T) {
 	t.Run("single posting swaps sides", func(t *testing.T) {
-		got := Postings{{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)}}.Reverse()
+		got, _ := Postings{{Source: "users:alice", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)}}.Reverse()
 		want := Postings{{Source: "users:bob", Destination: "users:alice", Asset: "USD/2", Amount: n(3000)}}
 		assertPostings(t, got, want)
 	})
@@ -123,7 +123,7 @@ func TestPostingsReverse(t *testing.T) {
 	// the case that matters. keeping the original order would pay A back out of
 	// B before C has returned anything, so B dips negative mid transaction.
 	t.Run("chain reverses order as well as sides", func(t *testing.T) {
-		got := Postings{
+		got, _ := Postings{
 			{Source: "A", Destination: "B", Asset: "USD/2", Amount: n(100)},
 			{Source: "B", Destination: "C", Asset: "USD/2", Amount: n(100)},
 		}.Reverse()
@@ -140,7 +140,7 @@ func TestPostingsReverse(t *testing.T) {
 			{Source: "B", Destination: "C", Asset: "USD/2", Amount: n(60)},
 			{Source: "C", Destination: "D", Asset: "EUR/2", Amount: n(40)},
 		}
-		assertPostings(t, original.Reverse().Reverse(), original)
+		assertPostings(t, mustReverse(mustReverse(original)), original)
 	})
 
 	// a reversal sharing pointers with the original would let a later mutation
@@ -148,7 +148,7 @@ func TestPostingsReverse(t *testing.T) {
 	t.Run("amounts are copied, not aliased", func(t *testing.T) {
 		amount := n(100)
 		original := Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: amount}}
-		reversed := original.Reverse()
+		reversed, _ := original.Reverse()
 
 		amount.SetInt64(999)
 
@@ -158,18 +158,27 @@ func TestPostingsReverse(t *testing.T) {
 	})
 
 	t.Run("empty", func(t *testing.T) {
-		if got := (Postings{}).Reverse(); len(got) != 0 {
+		if got, _ := (Postings{}).Reverse(); len(got) != 0 {
 			t.Errorf("got %v, want empty", got)
 		}
 	})
 
-	t.Run("panics on nil amount rather than treating it as zero", func(t *testing.T) {
+	// This used to assert a panic. giro is meant to be embedded, and a library
+	// that panics takes its host process down, so a malformed posting is now an
+	// error the caller can handle.
+	t.Run("nil amount is an error rather than a panic or a zero", func(t *testing.T) {
 		defer func() {
-			if recover() == nil {
-				t.Error("expected a panic")
+			if r := recover(); r != nil {
+				t.Errorf("panicked instead of returning an error: %v", r)
 			}
 		}()
-		Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.Reverse()
+		got, err := Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.Reverse()
+		if !errors.Is(err, ErrNilAmount) {
+			t.Errorf("err = %v, want ErrNilAmount", err)
+		}
+		if got != nil {
+			t.Errorf("returned %v alongside the error", got)
+		}
 	})
 }
 
@@ -207,4 +216,70 @@ func assertPostings(t *testing.T, got, want Postings) {
 				w.Source, w.Destination, w.Asset, w.Amount)
 		}
 	}
+}
+
+// A library that panics takes its host process down. giro is meant to be
+// embedded, so a malformed posting reaching these has to be an error the
+// caller can handle rather than a crash they cannot.
+func TestAMalformedPostingIsAnErrorRatherThanAPanic(t *testing.T) {
+	bad := Postings{
+		{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: big.NewInt(1)},
+		{Source: "world", Destination: "users:bob", Asset: "USD/2", Amount: nil},
+	}
+
+	t.Run("VolumeUpdates", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("panicked instead of returning an error: %v", r)
+			}
+		}()
+		got, err := bad.VolumeUpdates()
+		if !errors.Is(err, ErrNilAmount) {
+			t.Fatalf("err = %v, want ErrNilAmount", err)
+		}
+		if got != nil {
+			t.Errorf("returned %v alongside the error", got)
+		}
+		if !strings.Contains(err.Error(), "postings[1]") {
+			t.Errorf("err = %v, want it to name which posting", err)
+		}
+	})
+
+	t.Run("Reverse", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("panicked instead of returning an error: %v", r)
+			}
+		}()
+		got, err := bad.Reverse()
+		if !errors.Is(err, ErrNilAmount) {
+			t.Fatalf("err = %v, want ErrNilAmount", err)
+		}
+		if got != nil {
+			t.Errorf("returned %v alongside the error", got)
+		}
+	})
+
+	// and the well-formed case still works, because an error path that also
+	// broke the happy path would be a poor trade
+	good := Postings{{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: big.NewInt(5)}}
+	if _, err := good.VolumeUpdates(); err != nil {
+		t.Errorf("valid postings rejected: %v", err)
+	}
+	rev, err := good.Reverse()
+	if err != nil {
+		t.Errorf("valid postings rejected: %v", err)
+	}
+	if len(rev) != 1 || rev[0].Source != "users:alice" {
+		t.Errorf("Reverse returned %v", rev)
+	}
+}
+
+// mustReverse is for the tests whose subject is the reversal itself.
+func mustReverse(p Postings) Postings {
+	r, err := p.Reverse()
+	if err != nil {
+		panic(err)
+	}
+	return r
 }

@@ -162,8 +162,12 @@ func (s *Store) lockBatch(ctx context.Context, tx pgx.Tx, items []BatchItem) err
 	seen := map[key]bool{}
 	var all []ledger.VolumeUpdate
 
-	for _, item := range items {
-		for _, u := range item.Postings.VolumeUpdates() {
+	for i, item := range items {
+		itemUpdates, err := item.Postings.VolumeUpdates()
+		if err != nil {
+			return &BatchItemError{Index: i, Err: err}
+		}
+		for _, u := range itemUpdates {
 			k := key{u.Account, u.Asset}
 			if seen[k] {
 				continue

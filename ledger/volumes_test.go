@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand/v2"
@@ -37,7 +38,7 @@ func TestVolumesBalance(t *testing.T) {
 func TestVolumeUpdates(t *testing.T) {
 	t.Run("an account in several postings collapses to one entry", func(t *testing.T) {
 		// treasury receives once and pays out three times
-		got := Postings{
+		got, _ := Postings{
 			{Source: "world", Destination: "treasury", Asset: "USD/2", Amount: n(10000)},
 			{Source: "treasury", Destination: "users:alice", Asset: "USD/2", Amount: n(6000)},
 			{Source: "treasury", Destination: "users:bob", Asset: "USD/2", Amount: n(3000)},
@@ -56,7 +57,7 @@ func TestVolumeUpdates(t *testing.T) {
 	// source and destination resolve to the same entry, so both counters move.
 	// balance is unchanged but the row remembers the money went round.
 	t.Run("self posting moves both counters", func(t *testing.T) {
-		got := Postings{{Source: "users:alice", Destination: "users:alice", Asset: "USD/2", Amount: n(500)}}.VolumeUpdates()
+		got, _ := Postings{{Source: "users:alice", Destination: "users:alice", Asset: "USD/2", Amount: n(500)}}.VolumeUpdates()
 		assertUpdates(t, got, []VolumeUpdate{
 			{"users:alice", "USD/2", n(500), n(500)},
 		})
@@ -65,7 +66,7 @@ func TestVolumeUpdates(t *testing.T) {
 	// the key is (account, asset), so one account with two assets is two rows
 	// and the amounts are never combined.
 	t.Run("assets never mix", func(t *testing.T) {
-		got := Postings{
+		got, _ := Postings{
 			{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: n(10000)},
 			{Source: "world", Destination: "users:alice", Asset: "EUR/2", Amount: n(9200)},
 		}.VolumeUpdates()
@@ -79,7 +80,7 @@ func TestVolumeUpdates(t *testing.T) {
 	})
 
 	t.Run("sorted by account then asset", func(t *testing.T) {
-		got := Postings{
+		got, _ := Postings{
 			{Source: "zzz", Destination: "aaa", Asset: "USD/2", Amount: n(1)},
 			{Source: "mmm", Destination: "aaa", Asset: "EUR/2", Amount: n(1)},
 			{Source: "aaa", Destination: "zzz", Asset: "BTC/8", Amount: n(1)},
@@ -98,18 +99,27 @@ func TestVolumeUpdates(t *testing.T) {
 	})
 
 	t.Run("empty", func(t *testing.T) {
-		if got := (Postings{}).VolumeUpdates(); len(got) != 0 {
+		if got, _ := (Postings{}).VolumeUpdates(); len(got) != 0 {
 			t.Errorf("got %d updates, want 0", len(got))
 		}
 	})
 
-	t.Run("panics on nil amount", func(t *testing.T) {
+	// This used to assert a panic. A library that panics takes its host
+	// process down, and giro is meant to be embedded, so a malformed posting
+	// is now an error the caller can handle.
+	t.Run("nil amount is an error, not a panic", func(t *testing.T) {
 		defer func() {
-			if recover() == nil {
-				t.Error("expected a panic")
+			if r := recover(); r != nil {
+				t.Errorf("panicked instead of returning an error: %v", r)
 			}
 		}()
-		Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.VolumeUpdates()
+		got, err := Postings{{Source: "A", Destination: "B", Asset: "USD/2", Amount: nil}}.VolumeUpdates()
+		if !errors.Is(err, ErrNilAmount) {
+			t.Errorf("err = %v, want ErrNilAmount", err)
+		}
+		if got != nil {
+			t.Errorf("returned %v alongside the error", got)
+		}
 	})
 }
 
@@ -125,9 +135,9 @@ func TestVolumeUpdatesOrderIsDeterministic(t *testing.T) {
 		{Source: "world", Destination: "merchants:acme", Asset: "EUR/2", Amount: n(4500)},
 	}
 
-	first := orderOf(p.VolumeUpdates())
+	first := orderOf(mustUpdates(p))
 	for i := range 200 {
-		if got := orderOf(p.VolumeUpdates()); got != first {
+		if got := orderOf(mustUpdates(p)); got != first {
 			t.Fatalf("run %d produced a different order\n got: %s\nwant: %s", i, got, first)
 		}
 	}
@@ -152,7 +162,8 @@ func TestVolumeUpdatesConserveValue(t *testing.T) {
 		}
 
 		drift := map[Asset]*big.Int{}
-		for _, u := range p.VolumeUpdates() {
+		us, _ := p.VolumeUpdates()
+		for _, u := range us {
 			if drift[u.Asset] == nil {
 				drift[u.Asset] = new(big.Int)
 			}
@@ -171,7 +182,7 @@ func TestVolumeUpdatesConserveValue(t *testing.T) {
 // direction of the counters, which conservation alone would not catch if both
 // were swapped.
 func TestVolumeUpdatesDirection(t *testing.T) {
-	got := Postings{{Source: "payer", Destination: "payee", Asset: "USD/2", Amount: n(100)}}.VolumeUpdates()
+	got, _ := Postings{{Source: "payer", Destination: "payee", Asset: "USD/2", Amount: n(100)}}.VolumeUpdates()
 
 	assertUpdates(t, got, []VolumeUpdate{
 		{"payee", "USD/2", n(100), n(0)}, // arrived, so input
@@ -242,4 +253,14 @@ func seededRand(t *testing.T) *rand.Rand {
 
 	// two words from one seed, so a single number names the whole sequence.
 	return rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
+}
+
+// mustUpdates is for the tests whose subject is the ordering rather than the
+// error path.
+func mustUpdates(p Postings) []VolumeUpdate {
+	u, err := p.VolumeUpdates()
+	if err != nil {
+		panic(err)
+	}
+	return u
 }
