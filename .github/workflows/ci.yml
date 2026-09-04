@@ -85,6 +85,12 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # obs is a separate module, so ./... above does not reach it. a nested
+      # module nothing runs is one that quietly compiles against a version of
+      # the engine it has not seen in months, and finds out at a release.
+      - name: test the obs module
+        run: cd obs && go test -race -shuffle=on ./...
+
       # the same suite as the restricted application role, which is how it runs
       # in production. every application path must still pass; the tests that
       # skip are the ones that have to damage the book to prove the damage is
