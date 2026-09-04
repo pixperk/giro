@@ -12,6 +12,15 @@ const (
 	LogRevertedTransaction LogType = "REVERTED_TRANSACTION"
 	LogSetMetadata         LogType = "SET_METADATA"
 	LogDeleteMetadata      LogType = "DELETE_METADATA"
+
+	// LogRecovery marks resuming after a restore, and declares the range of
+	// ids that were issued in a database this one no longer contains.
+	//
+	// It is the only entry an operator causes rather than a caller, and it
+	// exists so that the gap it leaves is stated rather than merely present:
+	// verification accepts a gap only when the entry after it declares that
+	// gap, so an undeclared one is still a broken chain.
+	LogRecovery LogType = "RECOVERY"
 )
 
 // a log entry records one mutation. the log is the source of truth: the
@@ -89,4 +98,20 @@ func ChainHash(previous, data []byte) []byte {
 	h.Write(previous)
 	h.Write(data)
 	return h.Sum(nil)
+}
+
+// RecoveryPayload records what a restore lost, so the gap in the log is
+// self-explaining a year later when nobody remembers the incident.
+type RecoveryPayload struct {
+	// ResumedFrom is the last log id the restored database actually contained.
+	ResumedFrom int64 `json:"resumedFrom"`
+
+	// SkippedThrough is the highest log id known to have been issued before
+	// the restore. Ids from ResumedFrom+1 to SkippedThrough inclusive belonged
+	// to entries this database does not have, and are never reissued.
+	SkippedThrough int64 `json:"skippedThrough"`
+
+	// Note is whatever the operator wants their colleagues to read: a ticket,
+	// an incident number, a sentence.
+	Note string `json:"note,omitempty"`
 }

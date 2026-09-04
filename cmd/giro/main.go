@@ -19,6 +19,7 @@ commands:
   migrate    apply and inspect database migrations
   verify     run the invariant checks, and record that they ran
   account    set account policy, and take an account out of service
+  recover    a ledger's position, and resuming safely after a restore
 
 run a command with no arguments to see its own usage.
 `
@@ -60,6 +61,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return verifyCommand(ctx, args[1:])
 	case "account":
 		return accountCommand(ctx, args[1:])
+	case "recover":
+		return recoverCommand(ctx, args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil

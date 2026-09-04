@@ -679,3 +679,129 @@ func TestVerifyRefusesAFlagAfterALedgerName(t *testing.T) {
 		t.Errorf("the message does not say how to fix it:\n%s", u.text)
 	}
 }
+
+// The recovery path is the one an operator runs while something has already
+// gone wrong, so its failure modes matter more than most.
+func TestRecoverCommand(t *testing.T) {
+	ctx := context.Background()
+	url := isolatedDatabase(t)
+
+	if _, err := captureOutput(t, func() error { return dispatch(ctx, []string{"migrate", "up"}) }); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('main')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "insert into assets (ledger, asset) values ('main', 'USD/2')"); err != nil {
+		t.Fatal(err)
+	}
+	store := storage.New(pool, "main")
+	for range 3 {
+		if _, err := store.CommitTransaction(ctx, ledger.Postings{
+			{Source: "world", Destination: "users:alice", Asset: "USD/2", Amount: big.NewInt(100)},
+		}, storage.CommitOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var recorded string
+	t.Run("tip prints a position that can be pasted back in", func(t *testing.T) {
+		out, err := captureOutput(t, func() error { return dispatch(ctx, []string{"recover", "tip"}) })
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		recorded = strings.TrimSpace(out)
+		if !strings.HasPrefix(recorded, "main:3:") {
+			t.Fatalf("tip = %q, want main:3:<hash>", recorded)
+		}
+		// the whole point is that it round trips through a deployment record
+		if _, err := storage.ParseTip(recorded); err != nil {
+			t.Errorf("the printed tip does not parse: %v", err)
+		}
+	})
+
+	t.Run("check passes against the current position", func(t *testing.T) {
+		out, err := captureOutput(t, func() error {
+			return dispatch(ctx, []string{"recover", "check", recorded})
+		})
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "ok") {
+			t.Errorf("output does not confirm the ledger: %s", out)
+		}
+	})
+
+	t.Run("check fails, non-zero, against a position ahead of us", func(t *testing.T) {
+		ahead := "main:99:" + strings.SplitN(recorded, ":", 3)[2]
+		out, err := captureOutput(t, func() error {
+			return dispatch(ctx, []string{"recover", "check", ahead})
+		})
+		if err == nil {
+			t.Fatalf("a ledger behind its watermark exited zero:\n%s", out)
+		}
+		// a scheduler and a person both need to be told, and the message has
+		// to say what not to do next
+		if !strings.Contains(out, "FAIL") {
+			t.Errorf("the finding was not printed: %s", out)
+		}
+		if !strings.Contains(err.Error(), "do not write") {
+			t.Errorf("err = %v, want it to say writes must stop", err)
+		}
+	})
+
+	t.Run("resume declares the gap and the chain still verifies", func(t *testing.T) {
+		out, err := captureOutput(t, func() error {
+			return dispatch(ctx, []string{"recover", "resume", "main:9:" + strings.SplitN(recorded, ":", 3)[2],
+				"--note=incident 41"})
+		})
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "never reissued") {
+			t.Errorf("output does not say the skipped ids are retired: %s", out)
+		}
+
+		// the gap is real and the chain still verifies, which is the property
+		// the RECOVERY entry exists to provide
+		if _, err := storage.New(pool, "main").VerifyLog(ctx); err != nil {
+			t.Errorf("the chain broke across a declared gap: %v", err)
+		}
+		var kind, data string
+		if err := pool.QueryRow(ctx,
+			"select type, data::text from logs where ledger='main' and type='RECOVERY'").Scan(&kind, &data); err != nil {
+			t.Fatalf("no recovery entry was appended: %v", err)
+		}
+		if !strings.Contains(data, "incident 41") {
+			t.Errorf("the note was not recorded: %s", data)
+		}
+	})
+
+	t.Run("a mistake is refused rather than guessed at", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, want string
+			args       []string
+		}{
+			{"a malformed tip", "malformed", []string{"recover", "check", "nonsense"}},
+			{"an unknown ledger", "no ledger", []string{"recover", "resume", "nosuch:4:aaaa"}},
+			{"an unknown subcommand", "unknown recover command", []string{"recover", "frobnicate"}},
+			{"no arguments", "usage", []string{"recover"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := captureOutput(t, func() error { return dispatch(ctx, tc.args) })
+				if err == nil {
+					t.Fatal("accepted")
+				}
+				if !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("err = %v, want it to mention %q", err, tc.want)
+				}
+			})
+		}
+	})
+}

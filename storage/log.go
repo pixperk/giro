@@ -113,7 +113,7 @@ func (s *Store) insertLog(ctx context.Context, tx pgx.Tx, l *ledger.Log) error {
 // run it on demand, in tests, or on a schedule.
 func (s *Store) VerifyLog(ctx context.Context) (checked int, err error) {
 	rows, err := s.pool.Query(ctx,
-		`select id, data, hash from logs where ledger = $1 order by id`, s.ledger)
+		`select id, type, data, hash from logs where ledger = $1 order by id`, s.ledger)
 	if err != nil {
 		return 0, err
 	}
@@ -124,15 +124,32 @@ func (s *Store) VerifyLog(ctx context.Context) (checked int, err error) {
 
 	for rows.Next() {
 		var id int64
+		var kind string
 		var data, stored []byte
-		if err := rows.Scan(&id, &data, &stored); err != nil {
+		if err := rows.Scan(&id, &kind, &data, &stored); err != nil {
 			return checked, err
 		}
 
 		// ids are allocated from a counter inside the transaction, so a gap
 		// means an entry was deleted rather than rolled back.
+		//
+		// with one exception, and it has to declare itself. resuming a
+		// restored ledger above every id it ever issued leaves a real gap
+		// where the lost entries were, and pretending otherwise would mean
+		// either reissuing their ids or a check that fails forever. so a
+		// RECOVERY entry names the range it skipped and is believed only for
+		// exactly that range. a gap in front of anything else, or in front of
+		// a RECOVERY entry claiming a different range, is still an entry
+		// somebody deleted.
 		if id != expectedID {
-			return checked, fmt.Errorf("%w: expected log %d, found %d", ErrChainBroken, expectedID, id)
+			declared, err := declaredGap(kind, data)
+			if err != nil {
+				return checked, err
+			}
+			if declared == nil || declared.ResumedFrom != expectedID-1 || declared.SkippedThrough != id-1 {
+				return checked, fmt.Errorf("%w: expected log %d, found %d", ErrChainBroken, expectedID, id)
+			}
+			expectedID = id
 		}
 
 		if want := ledger.ChainHash(previous, data); !bytes.Equal(want, stored) {
@@ -145,4 +162,18 @@ func (s *Store) VerifyLog(ctx context.Context) (checked int, err error) {
 		checked++
 	}
 	return checked, rows.Err()
+}
+
+// declaredGap returns the recovery payload when this entry is one, so a gap in
+// front of it can be checked against what it claims. Anything else returns
+// nil, which the caller treats as a gap nobody accounted for.
+func declaredGap(kind string, data []byte) (*ledger.RecoveryPayload, error) {
+	if ledger.LogType(kind) != ledger.LogRecovery {
+		return nil, nil
+	}
+	var p ledger.RecoveryPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("%w: recovery entry does not decode: %w", ErrChainBroken, err)
+	}
+	return &p, nil
 }

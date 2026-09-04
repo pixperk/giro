@@ -639,7 +639,7 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
 <span class="c"># the schema, as the role that owns the tables. directly, never</span>
 <span class="c"># through a pooler: a session lock means nothing behind one.</span>
 <span class="sh">$</span> DATABASE_URL=$OWNER_URL <span class="f">giro migrate up</span>
-<span class="out">applied 11 migration(s) in 46ms</span>
+<span class="out">applied 12 migration(s) in 51ms</span>
 
 <span class="c"># a role that cannot disable its own guards</span>
 <span class="sh">$</span> <span class="f">just db-app-role</span>

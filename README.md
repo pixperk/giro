@@ -134,6 +134,9 @@ giro verify --last             when each check last ran
 giro account show <l> <addr>   how an account is bounded, per asset
 giro account allow-negative    permit a negative balance, one asset at a time
 giro account close  <l> <addr> take an account out of service
+giro recover tip [ledger...]   each ledger's position: ledger:logID:hash
+giro recover check <tip>       did a restore come back where you think
+giro recover resume <tip>      resume above every id ever issued
 ```
 
 Flags come before the ledger names, and `giro verify` refuses one written
@@ -588,9 +591,17 @@ deployment.
 | `giro verify` | Seven checks, nine with `--stale-after` and `--recon-after`. Exits non-zero on a finding. |
 | `giro verify --last --max-age=25h` | Fails if a check has stopped running |
 | `giro account` | Account bounds and closure. No endpoint, by design. |
+| [deploy/RECOVERY.md](deploy/RECOVERY.md) | **Read before you need it.** A ledger cannot be re-derived, and a restore silently reuses ids. |
+| `giro recover tip` | Record hourly. It is what proves a restore landed where you think. |
 | `just privileges` | What the serving connection can actually do |
 | `just db-sweep` | Drop test schemas an interrupted run left behind |
 | `just replay SEED` | Reproduce a property test failure from its printed seed |
+
+**Record the position hourly.** `giro verify && giro recover tip` prints
+`main:4291:3f4W…`. Ship it wherever your logs go. A restore takes every table
+back together — the ledgers row, the log, `verification_runs` — so nothing
+inside the database can tell you it happened. That line is the only thing the
+restore cannot reach. See [RECOVERY.md](deploy/RECOVERY.md).
 
 **Alert on two conditions, not one.** Findings above zero, *and* the absence of
 a recent run. A detector that stopped running looks exactly like a book with

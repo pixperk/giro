@@ -194,6 +194,31 @@ giro still needs some path to a shell — a task runner, a job, a release step.
 
 ---
 
+## Before any of this matters: recovery
+
+[**RECOVERY.md**](RECOVERY.md) is the one to read before you need it.
+
+The short version: a ledger cannot be re-derived, because nothing upstream
+knows the balances. And a restore silently reuses transaction ids — the trigger
+that forbids it fires on an `UPDATE`, and a restore replaces the table. Every
+check still passes afterwards; the book is internally perfect and no longer
+means what it meant.
+
+So add one line to whatever already runs `giro verify`:
+
+```bash
+giro verify && giro recover tip
+```
+
+```
+main:4291:3f4WLTEnfJp93aSndGTqdTjg547dZIt-5uyF9raDO4g
+```
+
+Ship it. It is the only thing a restore cannot reach, and it is what
+`giro recover check` compares against afterwards.
+
+---
+
 ## Telemetry, and what it does not cover
 
 `giro verify` answers "is the book sound". It says nothing about how the ledger

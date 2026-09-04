@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery.
 
 ---
 
@@ -1268,3 +1268,54 @@ Selection is delegated to the standard `OTEL_*` environment variables rather
 than to configuration of giro's own, so there is no second vocabulary to learn
 and `none` is a real setting — telemetry can be switched off in an environment
 without deleting the wiring that would otherwise rot while it was disabled.
+
+---
+
+### D54. A restore is an event the log declares, not a counter somebody bumps
+
+Every check in giro proves the book is consistent with itself. A restored
+database is consistent with itself: conservation holds, the chain verifies, the
+projection agrees. What it is not is consistent with the database it replaced.
+
+Ids come from a counter on the ledgers row, and a trigger refuses to let that
+counter go backwards (D19), because reusing an id means two transactions
+answering to the same name. **That trigger fires on an `UPDATE`, and a restore
+does not update anything** — it replaces the table, or the data directory. The
+counter goes back to the restore point, the next commit claims an id that has
+already been issued, and every downstream system holding "giro transaction
+4291" now points somewhere else. Nothing in the ledger notices.
+
+It cannot notice. Everything that could remember the higher position — the
+ledgers row, the log, `verification_runs` — was restored along with it,
+consistently, to the same earlier moment. So the position has to live somewhere
+the restore cannot reach, which means outside the database: `giro recover tip`
+prints `ledger:logID:hash`, small enough to paste into a deployment record.
+
+**The hash, not just the number.** A number answers "did the ledger go
+backwards". A number and a hash answer the question that matters: is
+transaction 4291 still the same transaction it was? That distinguishes a
+restore that lost entries, where the ids are about to be reused, from one where
+they already have been — two situations with very different mornings.
+
+**Resuming appends rather than sets.** Resuming above every id ever issued
+leaves a real gap where the lost entries were, and a gap is precisely what the
+chain check exists to catch: a missing id means somebody deleted an entry. The
+first attempt bumped the counters, and `VerifyLog` then failed forever — which
+the test caught, and which was the design telling us the answer.
+
+So the gap is declared. A `RECOVERY` log entry names the range it skipped,
+hash chained like everything else, and verification accepts a gap only when the
+entry after it declares that exact range. An undeclared gap, or a declaration
+naming a different range, is still a broken chain — so this does not weaken the
+check, it gives it a way to say "these ids were issued in a database that no
+longer exists".
+
+That is the same rule as the rest of the ledger. Nothing recorded is edited,
+and a correction is something you append. An operator quietly moving a counter
+is an edit wearing a different hat.
+
+The skipped ids are never reissued. They belonged to transactions that really
+happened, and leaving them unused is what stops a replay colliding with a real
+transaction this database no longer remembers — which is also why callers must
+send idempotency keys: re-applying the gap depends on it, and a caller that
+sends none turns step five of the procedure into manual reconciliation.
