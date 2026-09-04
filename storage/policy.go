@@ -192,3 +192,51 @@ func (s *Store) AllowsNegative(ctx context.Context, address ledger.Address, asse
 	}
 	return allow, nil
 }
+
+// AssetPolicy is how one account is bounded in one asset, beside what it
+// currently holds.
+//
+// the balance is here because a bound is only interesting next to the figure
+// it governs: "unbounded below" reads differently on an account sitting at
+// zero and on one sitting at minus four hundred thousand.
+type AssetPolicy struct {
+	Asset         ledger.Asset
+	Balance       *big.Int
+	AllowNegative bool
+	AllowPositive bool
+}
+
+// Policy reports how an account is bounded, one row per asset it has been
+// touched in.
+//
+// an account nothing has moved through has no rows and no policy to report,
+// which is not the same as an account with a policy of nothing: the defaults
+// it would be created with are documented on SetAllowNegative and
+// SetAllowPositive rather than invented here.
+func (s *Store) Policy(ctx context.Context, address ledger.Address) ([]AssetPolicy, error) {
+	if !address.Valid() {
+		return nil, fmt.Errorf("invalid account address %q", address)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		select asset, (input - output)::text, allow_negative, allow_positive
+		  from accounts_volumes
+		 where ledger = $1 and address = $2
+		 order by asset`, s.ledger, address)
+	if err != nil {
+		return nil, fmt.Errorf("read policy for %s: %w", address, err)
+	}
+	defer rows.Close()
+
+	var out []AssetPolicy
+	for rows.Next() {
+		var p AssetPolicy
+		var balance string
+		if err := rows.Scan(&p.Asset, &balance, &p.AllowNegative, &p.AllowPositive); err != nil {
+			return nil, fmt.Errorf("read policy for %s: %w", address, err)
+		}
+		p.Balance, _ = new(big.Int).SetString(balance, 10)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

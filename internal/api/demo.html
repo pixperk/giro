@@ -33,7 +33,23 @@
 * { box-sizing: border-box; }
 /* a display rule on an element beats the hidden attribute, so restate it */
 [hidden] { display: none !important; }
-html { -webkit-font-smoothing: antialiased; }
+html { -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation: none !important; transition: none !important; }
+}
+
+/* scrollbars: the trace and the wide tables scroll a lot, and the platform
+   default is a bright slab on a dark page. */
+* { scrollbar-width: thin; scrollbar-color: var(--rule-firm) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--rule-firm); border-radius: 99px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 body {
   margin: 0; background: var(--paper); color: var(--ink);
   font-family: var(--sans); font-size: 15px; line-height: 1.6;
@@ -60,12 +76,18 @@ h1 { color: #F2F6F3; }
 .links a { color: var(--ink-soft); }
 
 /* ---------- sections ---------- */
-section { padding: 3.5rem 0; scroll-margin-top: 1rem; border-bottom: 1px solid var(--rule); }
+section { padding: 3.5rem 0; scroll-margin-top: 4.5rem; border-bottom: 1px solid var(--rule); }
 section:last-of-type { border-bottom: none; }
 .eyebrow {
   font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--green); margin: 0 0 0.9rem;
+  display: flex; align-items: baseline; gap: .7rem;
 }
+/* the sections are a sequence — what it is, how you call it, what stops it
+   going wrong, how you run it — so they are numbered like one. */
+.eyebrow .no { color: var(--muted); font-variant-numeric: tabular-nums; }
+.eyebrow .no::after { content: ""; display: inline-block; width: 1.4rem; height: 1px;
+                      background: var(--rule-firm); margin-left: .7rem; vertical-align: middle; }
 h2 {
   font-family: var(--serif); font-weight: 400; font-size: clamp(1.9rem, 4vw, 2.6rem);
   line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 0.75rem;
@@ -88,19 +110,73 @@ code {
   font-family: var(--mono); font-size: 0.86em; background: var(--card);
   border: 1px solid var(--rule); border-radius: 3px; padding: 0.08em 0.32em;
 }
-.snippet {
-  font-family: var(--mono); font-size: 0.78rem; line-height: 1.65; margin: 0;
-  background: var(--card); border: 1px solid var(--rule); border-left: 2px solid var(--green);
-  border-radius: 4px; padding: 0.9rem 1rem; overflow-x: auto;
+/* ---------- code ----------
+   four hues, all sitting inside the page's green-biased ink rather than a
+   stock highlighter theme dropped on top of it. */
+:root {
+  --c-com: #66736C;  /* comment  */
+  --c-key: #8CB6D8;  /* keyword  */
+  --c-str: #D0A874;  /* string   */
+  --c-num: #C9A0D8;  /* number   */
+  --c-fn:  #74C29B;  /* call, type, prompt */
+  --c-pun: #8C9A94;  /* punctuation */
 }
-.snippet .k { color: var(--green); }
-.snippet .s { color: var(--ink-soft); }
+figure.code {
+  margin: 0; background: var(--card); border: 1px solid var(--rule);
+  border-radius: 6px; overflow: hidden;
+}
+figure.code + * { margin-top: 1.75rem; }
+figure.code figcaption {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .5rem .9rem; border-bottom: 1px solid var(--rule);
+  background: rgba(255,255,255,.015);
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted);
+}
+figure.code figcaption .lang {
+  color: var(--green); border: 1px solid var(--rule-firm); border-radius: 3px;
+  padding: .05rem .35rem; letter-spacing: .08em;
+}
+figure.code figcaption .where { margin-left: auto; text-transform: none; letter-spacing: .04em; }
+.snippet {
+  font-family: var(--mono); font-size: 0.78rem; line-height: 1.7; margin: 0;
+  background: transparent; border: 0; border-radius: 0;
+  padding: 0.95rem 1.1rem; overflow-x: auto; tab-size: 2;
+  white-space: pre; word-break: normal; overflow-wrap: normal;
+}
+.snippet .c { color: var(--c-com); font-style: italic; }
+.snippet .k { color: var(--c-key); }
+.snippet .s { color: var(--c-str); }
+.snippet .n { color: var(--c-num); }
+.snippet .f { color: var(--c-fn); }
+.snippet .p { color: var(--c-pun); }
+.snippet .sh { color: var(--c-fn); user-select: none; }   /* the $ or > prompt */
+.snippet .out { color: var(--ink-soft); }                 /* program output */
+.snippet .err { color: var(--red); }
+
+/* a doc example you can actually send */
+button.run {
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+  padding: .22rem .55rem; border-radius: 3px; margin-left: auto;
+  background: var(--green-bg); color: var(--green); border: 1px solid var(--rule-firm);
+}
+figure.code figcaption:has(button.run) .where { margin-left: auto; }
+button.run:hover:not(:disabled) { border-color: var(--green); background: #1B3129; color: #EAF6F0; }
+.result {
+  border-top: 1px solid var(--rule); padding: .8rem 1.1rem;
+  max-height: 22rem; overflow-y: auto;
+  font-family: var(--mono); font-size: .74rem; line-height: 1.65;
+  color: var(--ink-soft); white-space: pre-wrap; word-break: break-word;
+}
+.result .hint { font-family: var(--sans); font-size: .82rem; color: var(--muted); white-space: normal; }
+.result .ok  { color: var(--green); }
+.result .bad { color: var(--red); }
 .effect { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-top: 0.3rem; }
 .effect caption { text-align: left; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
                   text-transform: uppercase; color: var(--muted); padding-bottom: 0.6rem; }
 .note { font-size: 0.88rem; color: var(--muted); border-left: 2px solid var(--rule-firm);
         padding-left: 0.9rem; margin: 1.4rem 0 0; max-width: 60ch; }
-.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.6rem 2.5rem; }
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr)); gap: 1.6rem 2.5rem; }
 .scope h3 { font-family: var(--sans); font-size: 0.82rem; font-weight: 600; margin: 0 0 0.3rem;
             letter-spacing: 0.01em; }
 .scope p { font-size: 0.88rem; color: var(--muted); margin: 0; max-width: none; }
@@ -114,9 +190,14 @@ code {
 .timeline .late { color: var(--green); }
 
 /* ---------- console ---------- */
-.console { display: grid; grid-template-columns: 20rem 1fr; gap: 1px; background: var(--rule);
-           border: 1px solid var(--rule-firm); border-radius: 5px; overflow: hidden; }
+/* no overflow:hidden here — it would make the sticky readout below inert */
+.console { display: grid; grid-template-columns: 21rem minmax(0,1fr); gap: 1px; background: var(--rule);
+           border: 1px solid var(--rule-firm); border-radius: 5px; }
 .pane { background: var(--card); padding: 1.35rem; min-width: 0; }
+.console > .pane:first-child { border-radius: 5px 0 0 5px; }
+.console > .pane:last-child  { border-radius: 0 5px 5px 0; }
+/* the two columns are near enough the same height that neither needs to
+   follow the other. */
 .pane-title {
   font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--muted); margin: 0 0 1rem; display: flex; justify-content: space-between; align-items: baseline;
@@ -180,7 +261,7 @@ td.acct { font-family: var(--mono); font-size: 0.8rem; }
 pre {
   font-family: var(--mono); font-size: 0.75rem; line-height: 1.55; margin: 0;
   background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
-  padding: 0.8rem; overflow-x: auto; max-height: 15rem; white-space: pre-wrap; word-break: break-word;
+  padding: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
 }
 .status { font-family: var(--mono); font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
 .status.ok { background: var(--green-bg); color: var(--green); }
@@ -213,281 +294,916 @@ footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.82rem;
   .timeline div { grid-template-columns: 5.5rem 1fr auto; gap: 0.6rem; }
   .steps li { grid-template-columns: 1.4rem 1fr; }
 }
+/* ---------- nav ---------- */
+nav.top {
+  position: sticky; top: 0; z-index: 10; background: rgba(14,18,17,0.88);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule);
+}
+nav.top .wrap { display: flex; gap: 1.6rem; align-items: baseline; padding-top: .7rem; padding-bottom: .7rem; }
+nav.top a { color: var(--ink-soft); font-size: .84rem; text-decoration: none; }
+nav.top a:hover, nav.top a.on { color: var(--green); }
+nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink); margin-right: auto; }
+
+/* ---------- scenario groups ---------- */
+.group { margin-bottom: 1.1rem; }
+.group h4 {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 .45rem; font-weight: 400;
+}
+.trace {
+  font-family: var(--mono); font-size: .74rem; line-height: 1.6; margin: 0;
+  max-height: 15rem; overflow-y: auto; background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 4px; padding: .7rem .85rem;
+}
+.trace .req { color: var(--c-fn); font-weight: 500; }
+.trace .hdr { color: var(--c-key); }
+.trace .req-body { color: var(--c-str); }
+.trace .res-ok { color: var(--ink); }
+.trace .res-body { color: var(--ink-soft); }
+.trace .res-err { color: var(--red); }
+.trace .note { color: var(--muted); font-style: italic; }
+.trace .note::before { content: "· "; }
+.panes { display: grid; grid-template-columns: 1fr; gap: 1px; background: var(--rule); }
+.panes > div { background: var(--card); padding: 1.1rem 1.35rem; min-width: 0; }
+/* an address has no spaces to wrap at, so say where it may break, and pin the
+   amount to the right edge where it stays legible */
+#balances td:first-child, #chain td:first-child { overflow-wrap: anywhere; }
+#balances td:last-child, #chain td:last-child { text-align: right; white-space: nowrap; padding-left: .9rem; }
+#chain td:first-child { width: 2rem; }
+
+/* ---------- surface tables ---------- */
+.surface { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.surface th { text-align: left; font-family: var(--mono); font-size: .64rem; letter-spacing: .1em;
+              text-transform: uppercase; color: var(--muted); font-weight: 400;
+              padding: 0 .9rem .5rem 0; border-bottom: 1px solid var(--rule-firm); }
+.surface td { padding: .55rem .9rem .55rem 0; border-bottom: 1px solid var(--rule);
+              vertical-align: top; color: var(--ink-soft); }
+.surface td:first-child { color: var(--ink); font-family: var(--mono); font-size: .78rem; }
+.surface tr:last-child td { border-bottom: none; }
+.pill { font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+        padding: .12rem .4rem; border-radius: 3px; white-space: nowrap; }
+.pill.http { color: var(--green); background: var(--green-bg); }
+.pill.lib  { color: var(--amber, #D8AC6A); background: var(--amber-bg); }
+/* the guards table's first column is a sentence, not a symbol */
+.prose-first td:first-child { font-family: var(--sans); font-size: .84rem; }
+.prose-first td:first-child, .prose-first th:first-child { width: 22%; padding-right: 1.4rem; }
+.prose-first td:nth-child(2), .prose-first th:nth-child(2) { width: 15rem; }
+.prose-first .pill { display: inline-block; white-space: normal; line-height: 1.35; }
+.scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+/* a fade at the right edge, so a table that continues past the fold looks
+   like it continues rather than like it ends there */
+.scroll { background:
+  linear-gradient(to right, var(--paper) 30%, transparent) left / 3rem 100% no-repeat,
+  linear-gradient(to left,  var(--paper) 30%, transparent) right / 3rem 100% no-repeat,
+  radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.4), transparent) left / 1.2rem 100% no-repeat,
+  radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.4), transparent) right / 1.2rem 100% no-repeat;
+  background-attachment: local, local, scroll, scroll; }
+@media (max-width: 58rem) {
+  .console { grid-template-columns: 1fr; }
+  .console > .pane:first-child { border-radius: 5px 5px 0 0; }
+  .console > .pane:last-child  { border-radius: 0 0 5px 5px; }
+  .panes { grid-template-columns: 1fr; }
+  nav.top .wrap { gap: 1rem; overflow-x: auto; }
+}
+
 </style>
 </head>
 <body>
+<nav class="top">
+  <div class="wrap">
+    <span class="brand">giro</span>
+    <a href="#demo">Demo</a>
+    <a href="#model">Model</a>
+    <a href="#api">HTTP API</a>
+    <a href="#library">Library</a>
+    <a href="#guards">Guards</a>
+    <a href="#recon">Reconciliation</a>
+    <a href="#nohttp">No API</a>
+    <a href="#operating">Operating</a>
+    <a href="/docs">Reference &#8599;</a>
+  </div>
+</nav>
 
 <header>
   <div class="wrap">
     <div class="masthead">
       <div>
-        <h1>giro<em>.</em></h1>
-        <p class="tagline">A double entry ledger. Money moves between accounts, and the books cannot be made not to balance.</p>
+        <h1>A double entry<br><em>ledger</em></h1>
+        <p class="tagline">Money cannot be created or destroyed, history cannot be rewritten, and the database enforces both. Go and PostgreSQL, one dependency.</p>
       </div>
-      <p class="definition">from the Greek <i>gyros</i>, a circle: the circulation of money</p>
+      <p class="definition">giro, from the Greek for circle: a transfer between accounts. Value moves around the system and never leaves it.</p>
     </div>
-    <nav class="links">
-      <a href="#live">Live demo</a>
+    <div class="links">
+      <a href="#demo">Run it below &#8595;</a>
       <a href="/docs">API reference</a>
-      <a href="/openapi.yaml">OpenAPI spec</a>
-      <a href="/healthz">Health</a>
-    </nav>
+      <a href="/openapi.yaml">openapi.yaml</a>
+    </div>
   </div>
 </header>
 
-<section id="model">
+<section id="demo">
   <div class="wrap">
-    <p class="eyebrow">The model</p>
-    <h2>Four ideas, and everything follows</h2>
-    <p class="lede">The whole system is a consequence of these. If something below looks surprising, it is one of these being taken seriously.</p>
-    <div class="ideas">
-      <div class="idea">
-        <h3>A posting names both sides</h3>
-        <p>Source, destination, asset, and an amount that is always positive. An entry that does not balance is not something to detect. It cannot be written down.</p>
-      </div>
-      <div class="idea">
-        <h3>Volumes, not balances</h3>
-        <p>Each account keeps two counters that only ever increase: everything in, everything out. Balance is the difference. An account that settled millions and now holds nothing is not the same as one never used.</p>
-      </div>
-      <div class="idea">
-        <h3>Money is conserved</h3>
-        <p>Value enters from <code>world</code> and leaves to it. Only <code>world</code> may go negative, so every balance summed together is always exactly zero. Watch it below.</p>
-      </div>
-      <div class="idea">
-        <h3>The log is the truth</h3>
-        <p>Every change appends an entry whose hash covers the previous one. Editing history invalidates everything after it. The tables are a cache that can be rebuilt from the log.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="posting">
-  <div class="wrap">
-    <p class="eyebrow">The unit</p>
-    <h2>A posting, in full</h2>
-    <p class="lede">This is the whole vocabulary. Everything the ledger stores is built from records of this shape.</p>
-    <div class="split">
-      <div>
-<pre class="snippet">{
-  <span class="k">"source"</span>:      <span class="s">"users:alice"</span>,
-  <span class="k">"destination"</span>: <span class="s">"users:bob"</span>,
-  <span class="k">"asset"</span>:       <span class="s">"USD/2"</span>,
-  <span class="k">"amount"</span>:      3000
-}</pre>
-        <p class="note">Read aloud: <b>$30.00 moved from Alice to Bob.</b> Nothing is missing from that sentence, which is the point. The amount is always positive, because naming both sides already says which way it went.</p>
-        <p class="note"><code>USD/2</code> means two decimal places, so <code>3000</code> is thirty dollars. The scale lives inside the asset name rather than in a column beside it, so an amount cannot be read without knowing its unit. <code>USD</code> and <code>USD/2</code> are different assets and never mix.</p>
-      </div>
-      <div>
-        <table class="effect">
-          <caption>What that single posting does</caption>
-          <thead><tr><th>Account</th><th class="num">In</th><th class="num">Out</th><th class="num">Balance</th></tr></thead>
-          <tbody>
-            <tr><td class="acct">users:alice</td><td class="num">10000</td><td class="num">3000</td><td class="num">7000</td></tr>
-            <tr><td class="acct">users:bob</td><td class="num">3000</td><td class="num">0</td><td class="num">3000</td></tr>
-          </tbody>
-        </table>
-        <p class="note">Two rows touched, one counter on each. The same <code>3000</code> added twice, so whatever leaves one place arrives somewhere else and the total across all accounts does not move. Do that a million times and it still does not move.</p>
-        <p class="note">Neither counter ever goes down, including on a reversal. Alice refunded would read <code>13000 in, 3000 out</code>: back to where she started, with the record that it happened and was undone. A single balance column would forget both.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="world">
-  <div class="wrap">
-    <p class="eyebrow">The boundary</p>
-    <h2>Why there is an account called world</h2>
-    <div class="split">
-      <div>
-        <p>Every posting needs two sides. So write down the first thing that ever happens: <b>Alice deposits $500.</b> What goes in <code>source</code>? Every account is empty. The ledger has just been created.</p>
-        <p>The money is coming from outside a system that is closed by construction. <code>world</code> is that outside: a bank, a card network, somebody's pocket. The ledger does not know which, only that value crossed its edge.</p>
-      </div>
-      <div>
-        <p><code>world</code> is allowed a negative balance, and that is arithmetic rather than privilege. It starts at zero like everything else, so if it could not go negative the first deposit would fail and so would every one after it.</p>
-        <p>Its balance is a measurement. At <b>&minus;$500</b> it reads: five hundred dollars entered this ledger and have not left. For a wallet product that number is your total customer liability, and it is the one that should match your bank statement.</p>
-        <p>Every other account is refused a negative balance unless somebody granted it one, per account and per asset. <code>world</code> carries that permission from creation rather than by being named in the code, so it is the first account to hold it rather than an exception beside the rule.</p>
-        <p class="note">Think of chips on a poker table. Buying in takes chips from the rack. The rack is not a player and has no stack, and counting it gives you exactly the number of chips in play, negated.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="live">
-  <div class="wrap">
-    <p class="eyebrow">Live</p>
-    <h2>Drive the real thing</h2>
-    <p class="lede">Every button below is an HTTP call to this server. Nothing is mocked: the balances, the hashes and the errors are the ones the ledger produced.</p>
+    <p class="eyebrow"><span class="no">01</span>Live · against this server</p>
+    <h2>Try the whole thing</h2>
+    <p class="lede">Every button below issues real HTTP requests to the ledger you are talking to now. Nothing is mocked, and the panels are read back from the database after each step.</p>
 
     <div class="console">
       <div class="pane">
-        <p class="pane-title">Actions</p>
-        <div class="actions">
-          <button id="setup">Create a ledger<span class="hint">POST /v1/ledgers/{name}, then /assets</span></button>
-          <button data-post='{"postings":[{"source":"world","destination":"users:alice","asset":"USD/2","amount":50000}]}'>
-            Fund Alice with $500<span class="hint">money enters from world</span></button>
-          <button data-post='{"postings":[{"source":"users:alice","destination":"users:bob","asset":"USD/2","amount":12500},{"source":"users:alice","destination":"fees:platform","asset":"USD/2","amount":500}]}'>
-            Alice pays Bob, with a fee<span class="hint">two postings, one transaction</span></button>
-          <button class="danger" data-post='{"postings":[{"source":"users:bob","destination":"users:carol","asset":"USD/2","amount":9999999}]}'>
-            Try to overdraw Bob<span class="hint">this is meant to fail</span></button>
-          <button id="revert">Revert the last transaction<span class="hint">a compensating entry, never an edit</span></button>
-          <button class="ghost" id="bignum">Post a 33 digit amount<span class="hint">precision beyond what JSON numbers survive</span></button>
+        <p class="pane-title"><span>Scenarios</span><span id="ledgername">no ledger</span></p>
+
+        <div class="group">
+          <h4>Start here</h4>
+          <div class="actions">
+            <button id="setup">Create a ledger<span class="hint">POST /v1/ledgers/{name}, then register USD/2 and USDT/6</span></button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>The basics</h4>
+          <div class="actions">
+            <button data-run="fund" disabled>Money enters<span class="hint">world &rarr; alice, $500.00</span></button>
+            <button data-run="transfer" disabled>Pay someone, with a fee<span class="hint">three postings, one atomic transaction</span></button>
+            <button data-run="reject" class="danger" disabled>Try to overspend<span class="hint">refused, and nothing is written</span></button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>Money in flight</h4>
+          <div class="actions">
+            <button data-run="hold" disabled>Submit a wire<span class="hint">into a holding account: alice cannot spend it</span></button>
+            <button data-run="settle" disabled>It settles<span class="hint">holding &rarr; the bank</span></button>
+            <button data-run="bounce" disabled>Or it bounces<span class="hint">holding &rarr; alice, made whole</span></button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>Harder things</h4>
+          <div class="actions">
+            <button data-run="sweep" disabled>Sweep everything<span class="hint">move whatever is there, decided under the lock</span></button>
+            <button data-run="convert" disabled>Sell USDT for dollars<span class="hint">two assets, one transaction, rate recorded</span></button>
+            <button data-run="backdate" disabled>Book a late settlement<span class="hint">effective Monday, recorded today</span></button>
+            <button data-run="revert" disabled>Undo a transaction<span class="hint">a compensating entry, never an edit</span></button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>Talking to it safely</h4>
+          <div class="actions">
+            <button data-run="idem" disabled>Send it twice<span class="hint">same Idempotency-Key, one transaction</span></button>
+            <button data-run="dryrun" disabled>Ask without doing<span class="hint">?dryRun=true, the whole path, rolled back</span></button>
+            <button data-run="statement" disabled>Read a statement<span class="hint">alice's movements, line by line</span></button>
+          </div>
         </div>
 
         <div class="custom">
-          <label for="src">Or write your own posting</label>
+          <label for="src">Post your own</label>
           <div class="row2">
-            <input id="src" value="world" aria-label="source" placeholder="source">
-            <input id="dst" value="users:dana" aria-label="destination" placeholder="destination">
+            <input id="src" value="users:alice" aria-label="source">
+            <input id="dst" value="users:carol" aria-label="destination">
           </div>
           <div class="row2">
-            <input id="asset" value="USD/2" aria-label="asset" placeholder="asset">
-            <input id="amt" value="2500" aria-label="amount" placeholder="amount">
+            <input id="amt" value="1000" aria-label="amount in minor units">
+            <input id="ast" value="USD/2" aria-label="asset">
           </div>
-          <button id="custom">Commit it</button>
+          <button data-run="custom" disabled>Commit it</button>
         </div>
       </div>
 
-      <div class="pane">
-        <p class="pane-title"><span>Balances</span><span id="ledgername" class="hash"></span></p>
-        <div id="balances"><p class="empty">Create a ledger to begin.</p></div>
-        <div class="conservation" id="conservation" hidden>
-          <span>Every balance summed, including world</span><b id="drift">0</b>
+      <div class="pane readout">
+        <p class="pane-title"><span>What just happened</span><span id="conservation"></span></p>
+        <pre class="trace" id="trace">Create a ledger to begin.</pre>
+
+        <div class="panes" style="margin-top:1.35rem;border:1px solid var(--rule);border-radius:4px;overflow:hidden">
+          <div>
+            <p class="pane-title"><span>Balances</span></p>
+            <div id="balances"><p class="note" style="margin:0">nothing yet</p></div>
+          </div>
+          <div>
+            <p class="pane-title"><span>Hash chained log</span></p>
+            <div id="chain"><p class="note" style="margin:0">nothing yet</p></div>
+          </div>
         </div>
+      </div>
+    </div>
 
-        <p class="pane-title" style="margin-top:1.6rem">The log</p>
-        <div id="log"><p class="empty">Nothing has happened yet.</p></div>
-        <div class="chain" id="chain" hidden><span class="dot"></span><span id="chaintext"></span></div>
+    <p class="note">Every account summed together is exactly zero for every asset, always. That figure next to <em>What just happened</em> is the live conservation check, read back from the database after each step.</p>
+  </div>
+</section>
 
-        <p class="pane-title" style="margin-top:1.6rem"><span>Last response</span><span id="status"></span></p>
-        <p class="method" id="method"></p>
-        <pre id="response">Waiting.</pre>
+<section id="model">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">02</span>The model</p>
+    <h2>Four ideas carry the rest</h2>
+    <p class="lede">Everything above is these four, and nothing else.</p>
+
+    <div class="ideas">
+      <div class="idea">
+        <h3>A posting names both sides</h3>
+        <p>One amount, one asset, a source and a destination. No debit flag, no sign. An unbalanced entry is not something the shape of the data can express, so there is nothing to check.</p>
+      </div>
+      <div class="idea">
+        <h3>Volumes, not balances</h3>
+        <p>Each account holds <code>input</code> and <code>output</code>, both only ever increasing. Balance is the difference, computed on read. The database does the addition, so nothing read can become something written.</p>
+      </div>
+      <div class="idea">
+        <h3>The log is the truth</h3>
+        <p>Every change appends a SHA-256 entry chained to the one before. The tables are a projection of it, kept because replaying from zero on every read would be absurd. If they disagree, the log is right.</p>
+      </div>
+      <div class="idea">
+        <h3>Nothing recorded ever changes</h3>
+        <p>A mistake is corrected by appending its inverse. Triggers refuse an edit, a delete, and a truncate — against raw SQL, not just against the application.</p>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Where money comes from</h3>
+        <p>Every posting needs two sides, so the first deposit needs a source. Every account is empty and the money is coming from outside a system that is closed by construction.</p>
+        <p><code>world</code> is that outside: a bank, a card network, somebody's pocket. It is allowed a negative balance, and by default it is the only account that is.</p>
+        <p>Its balance is a measurement. At <b>&minus;$500</b> it reads: five hundred dollars entered this ledger and have not left. For a wallet product that number is your total customer liability, and it should match your bank.</p>
+        <p class="note">Splitting it per counterparty — <code>external:lp:kraken:USD</code> — makes each edge a balance you can compare against that counterparty's own statement. That is what reconciliation needs.</p>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Two kinds of time</h3>
+        <p>A settlement file arrives Thursday describing Tuesday's wire. So every transaction carries two timestamps: when it <em>happened</em>, and when we <em>found out</em>.</p>
+        <div class="timeline">
+          <div><span class="when">Mon 09:00</span><span>wire leaves, per the bank</span><span class="bal">effective</span></div>
+          <div><span class="when">Thu 14:20</span><span>file arrives, we record it</span><span class="bal late">recorded</span></div>
+        </div>
+        <p style="margin-top:1rem">"What was the balance on Wednesday" therefore has a real answer that changes when the file lands, and giro keeps both orderings so it can give you either. Ask with <code>?at=</code>.</p>
+        <p class="note">Anything ingesting settlement files from the outside world needs this, and it cannot be added later: it changes what every movement has to record.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="commit">
+<section id="api">
   <div class="wrap">
-    <p class="eyebrow">Inside a commit</p>
-    <h2>What happens when you press one of those buttons</h2>
-    <p class="lede">One database transaction, in exactly this order. Steps two and three are the whole trick.</p>
-    <ol class="steps">
-      <li><span><b>Collect every account the postings touch</b><span class="why">Both sides of every posting, deduplicated.</span></span></li>
-      <li><span><b>Sort them, always the same way</b><span class="why">Two transactions can only deadlock by taking the same locks in opposite orders. A fixed order removes the possibility rather than reducing the odds.</span></span></li>
-      <li><span><b>Create any missing rows, then lock them all</b><span class="why">You cannot lock a row that does not exist, and asking to lock a missing row silently locks nothing.</span></span></li>
-      <li><span><b>Check the resulting balances</b><span class="why">Reject if any account other than world would end below zero. The check is on the final state, so money may pass through an account within one transaction.</span></span></li>
-      <li><span><b>Add the deltas</b><span class="why">Always <code>input = input + n</code>, never a value computed earlier. The database does the arithmetic, so a stale read cannot become a stale write.</span></span></li>
-      <li><span><b>Take the next id and the chain tip</b><span class="why">From one row, under one lock. Gapless ids and a hash chain need the same lock, so the second is free.</span></span></li>
-      <li><span><b>Write the transaction and its per account moves</b><span class="why">Each move carries the account's balance at that instant, so history is a lookup rather than a replay.</span></span></li>
-      <li><span><b>Append the log entry and commit</b><span class="why">Hashed onto the previous entry, in the same transaction as everything above. The log and the data it describes both land or neither does.</span></span></li>
-    </ol>
+    <p class="eyebrow"><span class="no">03</span>Over HTTP</p>
+    <h2>The API</h2>
+    <p class="lede">Eighteen routes. The contract is <a href="/openapi.yaml">openapi.yaml</a> and the types are generated from it, so the wire format cannot drift from the spec.</p>
+
+    <div class="scroll">
+      <table class="surface">
+        <thead><tr><th>Route</th><th>Does</th></tr></thead>
+        <tbody>
+          <tr><td>POST /v1/ledgers/{ledger}</td><td>Create a ledger</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}</td><td>Its counters and chain tip</td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/assets</td><td>Register an asset. Required before anything can be posted in it.</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/assets</td><td>What this ledger handles</td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/transactions</td><td>Commit. <code>Idempotency-Key</code> header, <code>?dryRun=true</code></td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/transactions</td><td>List, cursor paginated</td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/transactions/bulk</td><td>Several as one atomic event</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/transactions/{id}</td><td>One transaction, as submitted</td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/transactions/{id}/revert</td><td>Commit its inverse</td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/transactions/{id}/metadata</td><td>Merge metadata</td></tr>
+          <tr><td>DELETE /v1/ledgers/{ledger}/transactions/{id}/metadata/{key}</td><td>Remove a key</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/accounts/{address}</td><td><code>?expand=volumes,effectiveVolumes&amp;at=</code></td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/accounts/{address}/balances</td><td><code>?at=</code> for an effective date</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/accounts/{address}/moves</td><td>A statement. <code>?asset= &amp;from= &amp;to=</code></td></tr>
+          <tr><td>POST /v1/ledgers/{ledger}/accounts/{address}/metadata</td><td>Merge metadata</td></tr>
+          <tr><td>DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}</td><td>Remove a key</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/balances</td><td><code>?prefix=users:</code>. With no prefix it is the conservation check.</td></tr>
+          <tr><td>GET&nbsp; /v1/ledgers/{ledger}/logs</td><td>The audit trail</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">Outside the versioned API: <code>/</code> this page, <code>/docs</code> the rendered contract, <code>/openapi.yaml</code> the contract itself, <code>/healthz</code> liveness.</p>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">One transaction, in full</h3>
+        <figure class="code" id="try">
+          <figcaption><span class="lang">http</span><span class="where">alice pays bob $125.00, and the platform $5.00</span>
+            <button class="run" id="try-send">Send it &#9656;</button></figcaption>
+<pre class="snippet"><span class="f">POST</span> /v1/ledgers/main/transactions
+<span class="k">Content-Type</span><span class="p">:</span> application/json
+<span class="k">Idempotency-Key</span><span class="p">:</span> pay-8f21c4
+
+<span class="p">{</span>
+  <span class="k">"postings"</span><span class="p">:</span> <span class="p">[</span>
+    <span class="p">{</span> <span class="k">"source"</span><span class="p">:</span> <span class="s">"users:alice"</span><span class="p">,</span> <span class="k">"destination"</span><span class="p">:</span> <span class="s">"users:bob"</span><span class="p">,</span>
+      <span class="k">"asset"</span><span class="p">:</span> <span class="s">"USD/2"</span><span class="p">,</span> <span class="k">"amount"</span><span class="p">:</span> <span class="n">12500</span> <span class="p">},</span>
+    <span class="p">{</span> <span class="k">"source"</span><span class="p">:</span> <span class="s">"users:alice"</span><span class="p">,</span> <span class="k">"destination"</span><span class="p">:</span> <span class="s">"fees:platform"</span><span class="p">,</span>
+      <span class="k">"asset"</span><span class="p">:</span> <span class="s">"USD/2"</span><span class="p">,</span> <span class="k">"amount"</span><span class="p">:</span> <span class="n">500</span> <span class="p">}</span>
+  <span class="p">],</span>
+  <span class="k">"reference"</span><span class="p">:</span> <span class="s">"inv-2291"</span><span class="p">,</span>
+  <span class="k">"timestamp"</span><span class="p">:</span> <span class="s">"2026-09-01T09:00:00Z"</span><span class="p">,</span>
+  <span class="k">"metadata"</span><span class="p">:</span> <span class="p">{</span> <span class="k">"giro/external.ref"</span><span class="p">:</span> <span class="s">"W-77219"</span> <span class="p">}</span>
+<span class="p">}</span></pre>
+          <div class="result" id="try-out"><span class="hint">Not an illustration. Sending it commits a real transaction against this server, in a scratch ledger created for you &mdash; so the response below is the response, not a sample of one.</span></div>
+        </figure>
+        <p class="note">Both postings land or neither does. <code>timestamp</code> is when it <em>happened</em>; when it was recorded is the server's business and it keeps both.</p>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Three headers worth knowing</h3>
+        <table class="surface">
+          <tbody>
+            <tr><td>Idempotency&#8209;Key</td><td>Replaying the same key returns the original transaction rather than committing a second one. A retry after a timeout is safe, which is the only way a payment client can be written.</td></tr>
+            <tr><td>?dryRun=true</td><td>Runs the whole commit path &mdash; locks, guards, balances &mdash; and rolls back. It answers &ldquo;would this be refused&rdquo; without a race between asking and doing.</td></tr>
+            <tr><td>?at=</td><td>On any balance read: as of an <em>effective</em> date. The answer changes when a late settlement file lands, which is correct.</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1.4rem">A refusal is a <code>4xx</code> naming the account, the asset and the amount it would have held. Nothing partial is written, and the log has no entry for it: a refused transaction did not happen, rather than happening and being undone.</p>
+        <p class="note">Amounts are integers in the asset's minor units, and <code>USD/2</code> carries its own scale &mdash; so <code>12500</code> is $125.00 and there is no float anywhere on the path.</p>
+      </div>
+    </div>
   </div>
 </section>
 
-<section id="clocks">
+<section id="library">
   <div class="wrap">
-    <p class="eyebrow">Two clocks</p>
-    <h2>When it happened, and when we found out</h2>
-    <p class="lede">A settlement file arriving on Tuesday describes Friday. A card capture settles days after authorisation. Anything touching the outside world hears late, so every transaction carries both dates and they are allowed to disagree.</p>
+    <p class="eyebrow"><span class="no">04</span>In your process</p>
+    <h2>Or use it as a library</h2>
+    <p class="lede">giro is importable, not only a server. Running it embedded means no network hop, no serialisation, and your transaction and its postings committing together.</p>
+
+    <div class="split" style="margin-bottom:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">From nothing to a posting</h3>
+        <figure class="code">
+          <figcaption><span class="lang">shell</span><span class="where">three commands and a running ledger</span></figcaption>
+<pre class="snippet"><span class="sh">$</span> <span class="f">go get</span> github.com/pixperk/giro
+
+<span class="c"># the schema. directly, never through a pooler:</span>
+<span class="c"># a session advisory lock means nothing behind one.</span>
+<span class="sh">$</span> <span class="f">giro migrate up</span>
+<span class="out">applied 11 migration(s) in 46ms</span>
+
+<span class="c"># a role that cannot disable its own guards</span>
+<span class="sh">$</span> <span class="f">just db-app-role</span>
+
+<span class="sh">$</span> <span class="f">giro serve</span> <span class="p">:</span><span class="n">8080</span>
+<span class="out">giro listening on :8080
+  docs  http://localhost:8080/docs
+  spec  http://localhost:8080/openapi.yaml</span></pre>
+        </figure>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Or without the server at all</h3>
+        <figure class="code">
+          <figcaption><span class="lang">go</span><span class="where">$500.00 into alice's account</span></figcaption>
+<pre class="snippet">store <span class="p">:=</span> storage<span class="p">.</span><span class="f">New</span><span class="p">(</span>pool<span class="p">,</span> <span class="s">"main"</span><span class="p">)</span>
+store<span class="p">.</span><span class="f">CreateLedger</span><span class="p">(</span>ctx<span class="p">)</span>
+store<span class="p">.</span><span class="f">RegisterAsset</span><span class="p">(</span>ctx<span class="p">,</span> <span class="s">"USD/2"</span><span class="p">)</span>
+
+tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.</span><span class="f">CommitTransaction</span><span class="p">(</span>ctx<span class="p">,</span>
+    ledger<span class="p">.</span><span class="f">Postings</span><span class="p">{{</span>
+        <span class="k">Source</span><span class="p">:</span>      <span class="s">"world"</span><span class="p">,</span>
+        <span class="k">Destination</span><span class="p">:</span> <span class="s">"users:alice"</span><span class="p">,</span>
+        <span class="k">Asset</span><span class="p">:</span>       <span class="s">"USD/2"</span><span class="p">,</span>
+        <span class="k">Amount</span><span class="p">:</span>      big<span class="p">.</span><span class="f">NewInt</span><span class="p">(</span><span class="n">50000</span><span class="p">),</span>
+    <span class="p">}},</span> storage<span class="p">.</span><span class="f">CommitOptions</span><span class="p">{})</span>
+
+<span class="c">// err is *InsufficientFundsError, *AccountClosedError,</span>
+<span class="c">// *UnknownAssetError — typed, so a caller can branch.</span></pre>
+        </figure>
+      </div>
+    </div>
+
+    <figure class="code">
+      <figcaption><span class="lang">go</span><span class="where">five packages, one dependency underneath them</span></figcaption>
+<pre class="snippet"><span class="k">import</span> <span class="p">(</span>
+    <span class="s">"github.com/pixperk/giro/ledger"</span>   <span class="c">// postings, volumes, addresses, assets</span>
+    <span class="s">"github.com/pixperk/giro/storage"</span>  <span class="c">// the engine</span>
+    <span class="s">"github.com/pixperk/giro/migrate"</span>  <span class="c">// the migration runner</span>
+    <span class="s">"github.com/pixperk/giro/fx"</span>       <span class="c">// conversion at a stated rate</span>
+    <span class="s">"github.com/pixperk/giro/recon"</span>    <span class="c">// matching statement lines</span>
+<span class="p">)</span></pre>
+    </figure>
+
+    <div class="scroll">
+      <table class="surface">
+        <thead><tr><th>Package</th><th>Knows about</th></tr></thead>
+        <tbody>
+          <tr><td>ledger</td><td>Postings, volumes, addresses, assets. No SQL, no domain words.</td></tr>
+          <tr><td>storage</td><td>The commit path, the guards, the checks. Postgres, no HTTP.</td></tr>
+          <tr><td>migrate</td><td>Applying migrations, and refusing to serve against a schema that does not match.</td></tr>
+          <tr><td>fx</td><td>Deriving a conversion's amounts from its rate, so two numbers that must agree become one.</td></tr>
+          <tr><td>recon</td><td>Ingesting what a bank or exchange says and pairing it with movements.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:1.5rem"><code>ledger</code> and <code>storage</code> know nothing about currencies, trades, wires or rails. <code>fx</code> and <code>recon</code> are layers above that do, and the compiler enforces the direction: the engine cannot import them. That is what keeps a general ledger from quietly becoming one company's ledger.</p>
+  </div>
+</section>
+
+<section id="guards">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">05</span>Enforced below the application</p>
+    <h2>What the database refuses</h2>
+    <p class="lede">Every rule below is a Postgres trigger or constraint, not a Go check. The distinction matters because the thing that eventually writes to your ledger by hand, at two in the morning, in psql, is not going to go through your Go code.</p>
+
+    <div class="scroll">
+      <table class="surface prose-first">
+        <thead><tr><th>Refused</th><th>Mechanism</th><th>Because</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Value appearing or vanishing</td>
+            <td><span class="pill lib">deferred constraint trigger</span></td>
+            <td>Every account summed, per ledger and per asset, is zero. Deferred because it can only be true at the end of a transaction &mdash; a posting is two half-truths and the check has to wait for both. A row trigger cannot see this, and neither can a statement trigger.</td>
+          </tr>
+          <tr>
+            <td>A volume going down</td>
+            <td><span class="pill lib">before update</span></td>
+            <td><code>input</code> and <code>output</code> are monotonic. A correction that reduced one would be indistinguishable from money never having moved.</td>
+          </tr>
+          <tr>
+            <td>Editing or deleting a transaction, a posting, a log entry</td>
+            <td><span class="pill lib">before update/delete</span></td>
+            <td>The book is append only. Corrections are appended as their inverse, which leaves the mistake and the fix both visible.</td>
+          </tr>
+          <tr>
+            <td><code>truncate</code></td>
+            <td><span class="pill lib">before truncate</span></td>
+            <td>Truncate fires no row triggers at all, so append-only enforced only per row is a door with a hole beside it. This is its own statement-level trigger for exactly that reason.</td>
+          </tr>
+          <tr>
+            <td>An overdraft</td>
+            <td><span class="pill lib">before insert/update</span></td>
+            <td>An account cannot go negative unless it was explicitly allowed to, and that permission is set from Go, not over HTTP. Also the reverse: an account can be barred from going positive, which is how a pure-outflow account stays one.</td>
+          </tr>
+          <tr>
+            <td>An unregistered asset</td>
+            <td><span class="pill lib">foreign key</span></td>
+            <td><code>USDD/2</code> is a perfectly well formed asset that is not the one you meant. Unchecked, it becomes a second currency holding real money, and conservation passes because each pile balances on its own.</td>
+          </tr>
+          <tr>
+            <td>Re-registering an asset at a new scale</td>
+            <td><span class="pill lib">before update/delete</span></td>
+            <td>It would silently reinterpret every amount already recorded in it. A restatement of the whole book, wearing the clothes of a config change.</td>
+          </tr>
+          <tr>
+            <td>A counter going backwards</td>
+            <td><span class="pill lib">before update</span></td>
+            <td>Transaction and log ids would be reused, and a hash chain whose ids repeat cannot be verified.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">A trigger the owner can turn off is a comment</h3>
+        <p>A table's owner may disable its triggers. So if the serving process connects as the role that owns the schema, every rule above is advisory &mdash; correct, documented, and one <code>alter table</code> away from gone.</p>
+        <p><code>just db-app-role</code> creates <code>giro_app</code>: column-scoped grants, ownership of nothing, membership in nothing. It can move money and it cannot change the rules money moves under.</p>
+        <p class="note">The test suite runs twice, once as the owner and once as <code>giro_app</code>. The tests that skip under the second run are exactly the ones that have to damage the book to prove a guard catches it &mdash; they cannot run as a role that is unable to do the damage.</p>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Refusal, in practice</h3>
+        <figure class="code">
+          <figcaption><span class="lang">sql</span><span class="where">as giro_app, application not running</span></figcaption>
+<pre class="snippet"><span class="sh">giro=&gt;</span> <span class="k">update</span> accounts_volumes
+     <span class="k">set</span> output <span class="p">=</span> output <span class="p">-</span> <span class="n">5000</span>
+   <span class="k">where</span> address <span class="p">=</span> <span class="s">'users:alice'</span><span class="p">;</span>
+<span class="err">ERROR:  giro: main USD/2 output fell from 13000
+        to 8000, volumes only increase</span>
+
+<span class="sh">giro=&gt;</span> <span class="k">delete from</span> transactions <span class="k">where</span> id <span class="p">=</span> <span class="n">3</span><span class="p">;</span>
+<span class="err">ERROR:  giro: transactions rows are never deleted</span>
+
+<span class="sh">giro=&gt;</span> <span class="k">truncate</span> logs <span class="k">cascade</span><span class="p">;</span>
+<span class="err">ERROR:  giro: logs is append only,
+        correct by appending</span>
+
+<span class="sh">giro=&gt;</span> <span class="k">alter table</span> accounts_volumes <span class="k">disable trigger all</span><span class="p">;</span>
+<span class="err">ERROR:  must be owner of table accounts_volumes</span></pre>
+        </figure>
+        <p class="note">Not the application refusing. This is raw SQL, from a psql prompt, with the application not running.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="recon">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">06</span>Against the outside world</p>
+    <h2>Reconciliation</h2>
+    <p class="lede">Every check above proves the book agrees with itself. None of them can tell you the money is actually in the bank &mdash; only the bank can answer that, and <code>recon</code> is the layer that asks.</p>
+
     <div class="split">
       <div>
-        <div class="timeline">
-          <div><span class="when">1 March</span><span>Alice is funded</span><span class="bal">+100</span></div>
-          <div><span class="when">3 March</span><span>Alice is paid again</span><span class="bal">+50</span></div>
-          <div><span class="when">5 March</span><span>Alice pays out</span><span class="bal">&minus;30</span></div>
-          <div><span class="when late">2 March</span><span class="late">a settlement file arrives on the 8th, describing the 2nd</span><span class="bal late">+50</span></div>
-        </div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">The boundary is an account</h3>
+        <p>Instead of one <code>world</code> for everything outside, give each counterparty its own edge: <code>external:bank:northwind:USD</code>, <code>external:lp:kraken:USDT</code>.</p>
+        <p>Each of those balances is then a claim about one real relationship, comparable against one real statement. Money entering the ledger crosses exactly one of them, which is the property that makes the comparison meaningful.</p>
+        <p>An account may only go negative if somebody said it could, so a boundary account is declared rather than named into being: <code>giro account allow-negative main external:bank:northwind:USD USD/2</code>, or <code>SetAllowNegative</code> from Go. Value cannot cross inward at an edge nobody opened.</p>
+        <p class="note">The prefix is configuration, not a rule. <code>Config.BoundaryPrefix</code> defaults to <code>external:</code> and your naming is your own.</p>
       </div>
       <div>
-        <p>Ask what Alice held <b>on 3 March</b> and the answer is 200, not 150. The backdated payment belongs in second place, and everything after it shifts.</p>
-        <p>So each movement stores the running balance twice: once frozen in the order the ledger learned things, and once in the order they actually happened. The first answers <i>what did we believe at the time</i>, which is what an audit asks. The second answers <i>what was true on that date</i>, which is what a report asks.</p>
-        <p class="note">Only the second is ever rewritten. Keeping both is what separates a reconciliation discrepancy from a bug: it lets you say the system was correct and the information arrived late.</p>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">A source is an interface</h3>
+        <figure class="code">
+          <figcaption><span class="lang">go</span><span class="where">the whole contract a provider has to meet</span></figcaption>
+<pre class="snippet"><span class="k">type</span> <span class="f">Source</span> <span class="k">interface</span> <span class="p">{</span>
+    <span class="f">ID</span><span class="p">()</span> <span class="k">string</span>
+    <span class="f">Name</span><span class="p">()</span> <span class="k">string</span>
+    <span class="f">Fetch</span><span class="p">(</span>ctx<span class="p">,</span> since<span class="p">)</span> <span class="p">([]</span><span class="f">Record</span><span class="p">,</span> <span class="k">error</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c">// and, where the counterparty will state a balance:</span>
+<span class="k">type</span> <span class="f">BalanceSource</span> <span class="k">interface</span> <span class="p">{</span>
+    <span class="f">Source</span>
+    <span class="f">Balance</span><span class="p">(</span>ctx<span class="p">,</span> asset<span class="p">)</span> <span class="p">(*</span>big<span class="p">.</span><span class="f">Int</span><span class="p">,</span> <span class="k">error</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c">// one line, as the source reported it</span>
+<span class="k">type</span> <span class="f">Record</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="k">ID</span><span class="p">,</span> <span class="k">Reference</span> <span class="k">string</span>
+    <span class="k">Asset</span>           ledger<span class="p">.</span><span class="f">Asset</span>
+    <span class="k">Amount</span>          <span class="p">*</span>big<span class="p">.</span><span class="f">Int</span>   <span class="c">// a magnitude, never signed</span>
+    <span class="k">Direction</span>       <span class="f">Direction</span> <span class="c">// In, Out, or Unknown</span>
+    <span class="k">OccurredAt</span>      time<span class="p">.</span><span class="f">Time</span>
+    <span class="k">Raw</span>             <span class="p">[]</span><span class="k">byte</span>    <span class="c">// what actually arrived</span>
+<span class="p">}</span></pre>
+        </figure>
+        <p style="margin-top:1.25rem">A <code>Record</code> is one statement line: an id, a reference, an asset, a positive magnitude, a direction, and the raw bytes it came from. A bank adapter, an exchange adapter and a chain indexer all reduce to that.</p>
+        <p class="note">No provider ships here. A ledger that ships a Kraken client has stopped being a general ledger. What ships is the interface, and a worked adapter in the tests &mdash; which is what proves the interface is sufficient rather than merely plausible.</p>
+      </div>
+    </div>
+
+    <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:2.5rem 0 .8rem">Four steps, none of which move money</h3>
+    <ol class="steps">
+      <li><div><b>Register</b> the source once, so its lines have somewhere to live.<span class="why">recon.Register(ctx, db, "main", src)</span></div></li>
+      <li><div><b>Pull or ingest</b> its lines. Staging is idempotent on the source's own line id, so an ingest that timed out halfway is safe to retry &mdash; a second run of the same file stages nothing new.<span class="why">recon.Pull(ctx, db, "main", src, since) &nbsp;·&nbsp; recon.Ingest(ctx, db, "main", id, records)</span></div></li>
+      <li><div><b>Match</b> lines against movements. Idempotent, so it belongs on a schedule.<span class="why">recon.Match(ctx, db, "main", cfg) &rarr; Summary</span></div></li>
+      <li><div><b>Look at what did not match.</b> That queue is the output. Nothing here writes a posting, and nothing corrects the book.<span class="why">A reconciler that could correct the book would be a second way for money to move, and the entire value of the layer is in having an independent opinion.</span></div></li>
+    </ol>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">It matches movements, not transactions</h3>
+        <p>A statement line is one account, one asset, one amount, one direction &mdash; which is exactly what a movement is. A transaction can be two of those at once: a conversion moves stablecoin one way and dollars the other, and has no single amount to compare a line against.</p>
+        <p>Two rules, both conservative:</p>
+        <table class="surface" style="margin-top:.6rem">
+          <tbody>
+            <tr><td>exact_ref</td><td>One line, one movement carrying the same <code>giro/external.ref</code>, same direction. Amounts inside tolerance match; outside it the pairing is still recorded, flagged as a variance.</td></tr>
+            <tr><td>consolidated_ref</td><td>One line against several movements sharing a reference &mdash; a batched payout arriving as one wire. They must sum <em>exactly</em>. If they do not, it is indistinguishable from a coincidence and is left alone.</td></tr>
+          </tbody>
+        </table>
+        <p class="note">The reference lives in metadata rather than in the <code>reference</code> field, because several movements can share one and a transaction reference is unique per ledger.</p>
+      </div>
+      <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">Unmatched is four problems</h3>
+        <p>Collapsing them into one number hides the fact that four different people fix them.</p>
+        <table class="surface" style="margin-top:.6rem">
+          <tbody>
+            <tr><td>no_reference</td><td>The source gave no match key. A source configuration problem, not a ledger one.</td></tr>
+            <tr><td>reference_not_found</td><td>A good reference naming nothing here. Either they recorded something we did not, or we have not recorded it yet.</td></tr>
+            <tr><td>reference_ambiguous</td><td>It resolves to several movements that do not sum to the line.</td></tr>
+            <tr><td>movement_already_matched</td><td>An earlier line from this source claimed it. Two lines competing for one movement.</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1.4rem"><b>And the level above lines.</b> <code>CompareBalance</code> asks a <code>BalanceSource</code> what it holds and compares it to the boundary account. It catches the failure line matching cannot: a movement neither side ever reported.</p>
+        <p class="note">That balance means the net position across the edge, from our side &mdash; which is a different query for a chain, an exchange and a bank, and is the adapter's job to get right.</p>
+      </div>
+    </div>
+
+    <p style="margin-top:2rem"><code>giro verify --recon-after=4h</code> folds this into the same run as everything else: a line staged longer than that without matching becomes a finding, and the exit code carries it.</p>
+  </div>
+</section>
+
+<section id="nohttp">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">07</span>Deliberately absent</p>
+    <h2>What has no API, and why</h2>
+    <p class="lede">A good deal of what giro does is reachable only from Go. None of it is an oversight, and the reasons differ.</p>
+
+    <div class="scroll">
+      <table class="surface">
+        <thead><tr><th>Capability</th><th>Where</th><th>Why not over HTTP</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Account bounds,<br>closure</td>
+            <td><span class="pill lib">library</span> <span class="pill lib">cli</span></td>
+            <td>These are the switches that turn the guards off. An endpoint letting a caller mark its own account unbounded is not an API, it is a hole in one — the overdraw guard is the thing standing between a bug and minted money, and permission to disable it should not travel over the same channel as the requests it protects against. <code>giro account</code> reaches the same database with the same role, and no listener in front of it.</td>
+          </tr>
+          <tr>
+            <td>The nine checks</td>
+            <td><span class="pill lib">library</span> <span class="pill lib">cli</span></td>
+            <td>Each is a full pass over a table. Behind an endpoint they are a denial of service anyone can trigger, and they answer a question nobody asks mid-request. They belong on a schedule that records that it ran, which is <code>giro verify</code>.</td>
+          </tr>
+          <tr>
+            <td>recon</td>
+            <td><span class="pill lib">library</span></td>
+            <td>Reconciliation needs a <code>Source</code>: something that calls your bank's API and returns normalised lines. That is an interface, and you cannot pass an implementation of one over HTTP. The adapter has to live in a process that can run your code.</td>
+          </tr>
+          <tr>
+            <td>fx</td>
+            <td><span class="pill lib">library</span></td>
+            <td>Not an operation. It builds the two postings a conversion needs from the rate you state, and you commit them through the ordinary transactions endpoint. There is nothing for a route to do.</td>
+          </tr>
+          <tr>
+            <td>migrate</td>
+            <td><span class="pill lib">library</span> <span class="pill lib">cli</span></td>
+            <td>Schema changes take a session lock and must connect directly to Postgres rather than through a pooler. A serving process should not be able to change the schema, or to claim it changed one.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:1.6rem">The line is the same in every row: <b>the API is for moving money, and everything else is not.</b> Setup, policy and inspection are operator work, done by something with a shell or a deployment, not by whatever is holding an HTTP connection.</p>
+
+    <figure class="code" style="margin-top:1.8rem;max-width:46rem">
+      <figcaption><span class="lang">shell</span><span class="where">the operator side, in full</span></figcaption>
+<pre class="snippet"><span class="c"># how is this account bounded, and what does it hold?</span>
+<span class="sh">$</span> <span class="f">giro account show</span> main external:lp:kraken:USD
+<span class="out">external:lp:kraken:USD  open
+  ASSET  BALANCE  BOUNDS
+  USD/2  -9996    unbounded — no rule in either direction</span>
+
+<span class="c"># declare a boundary account: value may cross inward here</span>
+<span class="sh">$</span> <span class="f">giro account allow-negative</span> main external:lp:kraken:USD USD/2
+
+<span class="c"># a cost line only ever leans one way, and this is what says so</span>
+<span class="sh">$</span> <span class="f">giro account refuse-positive</span> main cost:peg_absorption USD/2
+
+<span class="c"># out of service. it cannot close while it still holds a balance.</span>
+<span class="sh">$</span> <span class="f">giro account close</span> main users:alice</pre>
+    </figure>
+
+    <p class="note">The privilege is not what separates them: <code>giro_app</code> is granted <code>update</code> on the policy columns and always was, because the commit path needs the row. The channel is. So if you run giro as a service you still need a path to run <code>giro account</code> and <code>giro verify</code> — a job, a task runner, a deployment step. Serving it and operating it are two jobs.</p>
+  </div>
+</section>
+
+<section id="operating">
+  <div class="wrap">
+    <p class="eyebrow"><span class="no">08</span>Running it</p>
+    <h2>Operating</h2>
+    <p class="lede">Seven checks, none on the write path, each reporting what it examined. Two more run when you say what counts as stale, because neither window has a default anyone else can choose for you.</p>
+
+    <figure class="code">
+      <figcaption><span class="lang">shell</span><span class="where">exit 0 only if every check ran and found nothing</span></figcaption>
+<pre class="snippet"><span class="sh">$</span> <span class="f">giro verify</span> --stale-after<span class="p">=</span>4h --recon-after<span class="p">=</span>4h --record
+<span class="out">main
+  ok   conservation               4 checked    13ms
+  ok   log                        2 checked     1ms
+  ok   projection                 4 checked     2ms
+  ok   effective_volumes          6 checked     1ms
+  ok   balance_permissions        4 checked     1ms
+  ok   closed_accounts            0 checked     2ms
+  ok   stale_balances             2 checked     1ms
+  ok   conversions                1 checked     1ms
+  ok   reconciliation             7 checked     6ms</span>
+
+<span class="c"># and the second alarm: has it stopped running at all?</span>
+<span class="sh">$</span> <span class="f">giro verify</span> --last --max-age<span class="p">=</span>25h
+<span class="err">main
+  STALE  reconciliation   last ran 3d ago</span>
+<span class="sh">$</span> <span class="f">echo</span> $?
+<span class="out">1</span></pre>
+    </figure>
+
+    <div class="scope" style="margin-top:2rem">
+      <div>
+        <h3>Alert on two conditions</h3>
+        <p>Findings above zero is the one everybody writes. The absence of a run is the one that matters when the scheduler dies, because <b>a detector that stopped running looks exactly like a book with nothing wrong.</b></p>
+        <p><code>giro verify --last --max-age=25h</code> fails if a check has stopped, so a monitor treats it the same way: run it, look at the exit code.</p>
+      </div>
+      <div>
+        <h3>Connect as a role that cannot alter a table</h3>
+        <p>A table's owner outranks its own triggers, so serving as the owner makes every guard advisory. <code>just db-app-role</code> creates a role with no privileges of its own that inherits only what the application needs.</p>
+        <p><code>giro serve</code> warns at boot if it can disable its own guards, and refuses to start against a schema it does not match.</p>
+      </div>
+      <div>
+        <h3>Behind a transaction pooler</h3>
+        <p>The runtime takes no session locks, so it pools cleanly. Two conditions: migrations must connect <b>directly</b>, because a session advisory lock provides no mutual exclusion through a pooler, and the pooler must support prepared statements.</p>
+      </div>
+      <div>
+        <h3>What to page on</h3>
+        <p><code>conservation</code>, <code>log</code> and <code>projection</code> mean the ledger is wrong about itself, which is the thing it exists to make impossible. The rest mean the world and the book disagree, or somebody needs to decide something. Those are morning work.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="scope">
-  <div class="wrap">
-    <p class="eyebrow">Scope</p>
-    <h2>What it deliberately does not decide</h2>
-    <p class="lede">The ledger records movements. It does not judge them. Everything below is somebody else's decision, and keeping them out is what lets this stay small enough to trust.</p>
-    <div class="scope">
-      <div><h3>Who may move money</h3><p>Authentication and authorisation are upstream. This service trusts its caller, which is why it belongs behind your API rather than in front of your users.</p></div>
-      <div><h3>Whether a payment is allowed</h3><p>Fraud rules, sanctions, limits, holds. All policy, all decided before a posting is written.</p></div>
-      <div><h3>What an exchange rate should be</h3><p>Converting $100 to &euro;92 is two postings committed together. The ledger records that both happened and has no opinion on the rate.</p></div>
-      <div><h3>Whether real money moved</h3><p>A deposit says value crossed this ledger's edge. Confirming cash reached a bank account is reconciliation, against a statement.</p></div>
-      <div><h3>What an account means</h3><p><code>users:alice:wallet</code> is a string. The hierarchy is your convention; the ledger indexes it without understanding it.</p></div>
-      <div><h3>How to retry</h3><p>It makes retrying safe. Send the same <code>Idempotency-Key</code> and the original transaction comes back rather than a second one. Send that key with different contents and it is an error, not a silent success for a payment that never happened.</p></div>
-    </div>
-  </div>
-</section>
-
-<footer>
-  <div class="wrap">
-    Postgres for storage, one dependency, no framework.
-    Full reference at <a href="/docs">/docs</a>, contract at <a href="/openapi.yaml">/openapi.yaml</a>.
+<footer style="border-top:1px solid var(--rule-firm);padding:2.5rem 0 4rem">
+  <div class="wrap" style="display:flex;gap:2rem;flex-wrap:wrap;font-size:.86rem;color:var(--muted)">
+    <span>giro</span>
+    <a href="/docs">API reference</a>
+    <a href="/openapi.yaml">openapi.yaml</a>
+    <a href="#demo">Run the demo</a>
+    <span style="margin-left:auto">Every balance, summed, is zero.</span>
   </div>
 </footer>
 
 <script>
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
 let ledger = null;
-let lastTxId = null;
+let lastTx = null;
 
-function fmt(assetCode, raw) {
-  const parts = String(assetCode).split("/");
-  const scale = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-  const neg = raw.startsWith("-");
-  let digits = neg ? raw.slice(1) : raw;
-  if (!scale) return (neg ? "-" : "") + digits;
-  digits = digits.padStart(scale + 1, "0");
-  const whole = digits.slice(0, -scale).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return (neg ? "-" : "") + whole + "." + digits.slice(-scale);
+/* ---------- scroll spy: the nav says where you are ---------- */
+const links = [...document.querySelectorAll("nav.top a[href^='#']")];
+const spy = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id));
+  }
+}, { rootMargin: "-20% 0px -70% 0px" });
+document.querySelectorAll("section[id]").forEach(s => spy.observe(s));
+
+/* ---------- the trace: every request, as it happens ---------- */
+function say(cls, text) {
+  const el = $("trace");
+  if (el.dataset.fresh !== "1") { el.textContent = ""; el.dataset.fresh = "1"; }
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
 }
 
-// amounts can exceed what a JSON number survives, so read them out of the raw
-// text rather than through JSON.parse
-function rawNumbers(text, key) {
-  const out = {};
-  const re = new RegExp('"' + key + '"\\s*:\\s*(-?\\d+)', "g");
-  let m;
-  while ((m = re.exec(text)) !== null) out[m.index] = m[1];
-  return out;
-}
-
-async function call(method, path, body) {
-  $("method").textContent = method + " " + path;
+async function call(method, path, body, headers = {}) {
+  say("req", method + " " + path);
+  for (const [k, v] of Object.entries(headers)) say("hdr", "  " + k + ": " + v);
+  if (body) for (const line of pretty(JSON.stringify(body))) say("req-body", "  " + line);
   let res, text;
   try {
     res = await fetch(path, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : {},
-      body: body || undefined,
+      headers: Object.assign(body ? { "Content-Type": "application/json" } : {}, headers),
+      body: body ? JSON.stringify(body) : undefined,
     });
     text = await res.text();
-  } catch (e) {
-    $("status").className = "status err";
-    $("status").textContent = "network";
-    $("response").textContent = String(e);
+  } catch (err) {
+    say("res-err", "  network: " + err);
     return null;
   }
-  $("status").className = "status " + (res.ok ? "ok" : "err");
-  $("status").textContent = res.status;
-  try {
-    $("response").textContent = JSON.stringify(JSON.parse(text), null, 2);
-  } catch { $("response").textContent = text || "(empty)"; }
-  return { ok: res.ok, text };
+  say(res.ok ? "res-ok" : "res-err", "  " + res.status + " " + statusText(res.status));
+  for (const line of pretty(text)) say(res.ok ? "res-body" : "res-err", "  " + line);
+  return { ok: res.ok, status: res.status, body: text ? JSON.parse(text) : null };
 }
 
+const post = (postings, opts = {}) =>
+  call("POST", base() + "/transactions", Object.assign({ postings }, opts));
+
+/* Every scenario has to stand on its own, because a reader clicks them in
+   whatever order they are curious about. These two top up what a step needs
+   before it runs, and say so, rather than failing on a precondition the
+   reader had no way to know about. */
+async function balanceOf(account, asset) {
+  const text = await fetch(base() + "/accounts/" + encodeURIComponent(account) + "/balances")
+    .then(r => r.text()).catch(() => "");
+  const m = text.match(new RegExp('"' + asset.replace("/", "\\/") + '"\\s*:\\s*(-?\\d+)'));
+  return m ? BigInt(m[1]) : 0n;
+}
+
+async function ensure(account, asset, amount) {
+  const have = await balanceOf(account, asset);
+  const need = BigInt(amount) - have;
+  if (need <= 0n) return;
+  say("note", "first, " + account + " needs " + fmt(String(need), asset) + " " + asset +
+              " — from world, so this step stands on its own");
+  await post([P("world", account, asset, Number(need))]);
+}
+
+const base = () => "/v1/ledgers/" + ledger;
+const P = (source, destination, asset, amount, extra = {}) =>
+  Object.assign({ source, destination, asset, amount }, extra);
+
+/* A wire has to exist before it can settle or bounce, and those two are
+   alternative endings to the same story rather than steps in a sequence, so
+   either can be clicked first. */
+async function ensureWire() {
+  if (await balanceOf("pending:wire:W1", "USD/2") >= 20000n) return;
+  await ensure("users:alice", "USD/2", 20000);
+  say("note", "putting a wire in flight first: alice → pending:wire:W1");
+  await post([P("users:alice", "pending:wire:W1", "USD/2", 20000)]);
+}
+
+/* ---------- the scenarios ---------- */
+const SCENARIOS = {
+  async fund() {
+    say("note", "value enters from world, the only account allowed to go negative");
+    await post([P("world", "users:alice", "USD/2", 50000)]);
+  },
+
+  async transfer() {
+    await ensure("users:alice", "USD/2", 13000);
+    say("note", "two postings, one transaction: all of it commits or none does");
+    await post([
+      P("users:alice", "users:bob", "USD/2", 12500),
+      P("users:alice", "fees:platform", "USD/2", 500),
+    ]);
+  },
+
+  async reject() {
+    say("note", "bob does not have this much. expect a 422 — that is the scenario.");
+    say("note", "the guard refuses it, and nothing partial is written.");
+    await post([P("users:bob", "users:carol", "USD/2", 9999999)]);
+  },
+
+  async hold() {
+    await ensure("users:alice", "USD/2", 20000);
+    say("note", "the wire leaves alice for a holding account: she can no longer spend it,");
+    say("note", "and it has not left the ledger either. it is money in flight.");
+    await post([P("users:alice", "pending:wire:W1", "USD/2", 20000)]);
+  },
+
+  async settle() {
+    await ensureWire();
+    say("note", "the bank confirms. the holding account empties across the boundary.");
+    await post([P("pending:wire:W1", "external:bank:northwind:USD", "USD/2", 20000)]);
+  },
+
+  async bounce() {
+    await ensureWire();
+    say("note", "or it comes back, and alice is made whole. she was never wrong,");
+    say("note", "and there is no edit anywhere: the money simply moves back.");
+    await post([P("pending:wire:W1", "users:alice", "USD/2", 20000)]);
+  },
+
+  async sweep() {
+    await ensure("users:bob", "USD/2", 4000);
+    say("note", "no amount given. the ledger decides it while holding the row lock,");
+    say("note", "so nothing can change the balance between deciding and moving.");
+    await post([P("users:bob", "treasury:usd", "USD/2", null, { upTo: true })]);
+  },
+
+  async convert() {
+    // 100 USDT to sell, and a USD balance already sitting at the venue. A
+    // positive balance on a boundary account is our money parked with that
+    // counterparty, which is exactly the figure CompareBalance checks.
+    await ensure("treasury:usdt", "USDT/6", 100000000);
+    await ensure("external:lp:kraken:USD", "USD/2", 20000);
+
+    say("note", "sell 100.000000 USDT at 0.99960. two assets, one transaction:");
+    say("note", "conservation holds per asset, so the ledger has no idea the two");
+    say("note", "sides are related. the rate is metadata, and fx verifies it.");
+    await post([
+      P("treasury:usdt", "external:lp:kraken:USDT", "USDT/6", 100000000),
+      P("external:lp:kraken:USD", "ops:usd", "USD/2", 9996),
+    ], { metadata: { "giro/conversion.rate": "0.99960", "giro/conversion.from": "USDT/6", "giro/conversion.to": "USD/2" } });
+  },
+
+  async backdate() {
+    const monday = new Date(Date.now() - 3 * 864e5).toISOString();
+    say("note", "effective " + monday.slice(0, 10) + ", recorded now. two clocks.");
+    await post([P("world", "users:alice", "USD/2", 7500)], { timestamp: monday });
+    const asOf = new Date(Date.now() - 4 * 864e5).toISOString();
+    say("note", "and alice's balance as of the day before it happened:");
+    await call("GET", base() + "/accounts/users:alice/balances?at=" + encodeURIComponent(asOf));
+  },
+
+  async revert() {
+    await ensure("users:alice", "USD/2", 3000);
+    say("note", "a payment that should not have happened:");
+    const r = await post([P("users:alice", "users:carol", "USD/2", 3000)]);
+    if (!r || !r.ok) return;
+    say("note", "not an edit, and not a deletion. its inverse is committed as a");
+    say("note", "new transaction, so both the mistake and the fix stay on the record.");
+    await call("POST", base() + "/transactions/" + r.body.id + "/revert", {});
+  },
+
+  async idem() {
+    await ensure("users:alice", "USD/2", 2500);
+    const key = "demo-" + Math.random().toString(36).slice(2, 8);
+    say("note", "the same request twice, under one key. a client that timed out");
+    say("note", "and retried must not pay carol twice.");
+    for (const attempt of ["first", "retry"]) {
+      say("note", attempt + ", Idempotency-Key: " + key);
+      await call("POST", base() + "/transactions",
+        { postings: [P("users:alice", "users:carol", "USD/2", 2500)] }, { "Idempotency-Key": key });
+    }
+    say("note", "same transaction id both times. one movement of money.");
+  },
+
+  async dryrun() {
+    say("note", "the whole commit path — locks, guards, balances — then rolled back.");
+    await call("POST", base() + "/transactions?dryRun=true",
+      { postings: [P("users:alice", "users:dave", "USD/2", 100)] });
+    say("note", "and one that would be refused. expect a 422, from a request that");
+    say("note", "changed nothing: this is how you ask without racing to find out.");
+    await call("POST", base() + "/transactions?dryRun=true",
+      { postings: [P("users:dave", "users:alice", "USD/2", 100000)] });
+  },
+
+  async statement() {
+    say("note", "not a balance. every movement across one account, with its cause.");
+    await call("GET", base() + "/accounts/users:alice/moves?asset=USD/2");
+  },
+
+  async custom() {
+    const src = $("src").value.trim(), dst = $("dst").value.trim();
+    const asset = $("ast").value.trim(), amount = parseInt($("amt").value, 10) || 0;
+    // world is where money comes from and needs nothing; anything else does.
+    if (src !== "world") await ensure(src, asset, amount);
+    await post([P(src, dst, asset, amount)]);
+  },
+};
+
+/* ---------- reading the state back ---------- */
 async function refresh() {
   if (!ledger) return;
-  const base = "/v1/ledgers/" + ledger;
 
-  const bal = await fetch(base + "/balances").then(r => r.text());
-  const all = await fetch(base + "/transactions?limit=100").then(r => r.json());
+  const conserved = await fetch(base() + "/balances").then(r => r.text());
+  const drift = [...conserved.matchAll(/:\s*(-?\d+)/g)].map(m => +m[1]);
+  const ok = drift.every(n => n === 0);
+  $("conservation").textContent = ok ? "conserved ✓" : "DRIFT " + conserved;
+  $("conservation").style.color = ok ? "var(--green)" : "var(--red)";
 
-  // accounts, gathered from the transactions we posted
+  const all = await fetch(base() + "/transactions?limit=100").then(r => r.json());
+  if (all.items && all.items.length) lastTx = all.items[0].id;
+
   const seen = new Set();
   for (const tx of all.items || []) {
     for (const p of tx.postings) { seen.add(p.source); seen.add(p.destination); }
@@ -495,103 +1211,133 @@ async function refresh() {
 
   const rows = [];
   for (const acct of [...seen].sort()) {
-    const text = await fetch(base + "/accounts/" + encodeURIComponent(acct) + "/balances").then(r => r.text());
-    const m = text.match(/"([^"]+)"\s*:\s*(-?\d+)/g) || [];
-    for (const pair of m) {
+    const text = await fetch(base() + "/accounts/" + encodeURIComponent(acct) + "/balances").then(r => r.text());
+    for (const pair of text.match(/"([^"]+)"\s*:\s*(-?\d+)/g) || []) {
       const parts = pair.match(/"([^"]+)"\s*:\s*(-?\d+)/);
       rows.push({ acct, asset: parts[1], amount: parts[2] });
     }
   }
 
-  $("balances").innerHTML = rows.length ? `
-    <table><thead><tr><th>Account</th><th>Asset</th><th class="num">Balance</th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${r.acct === "world" ? "world" : ""}">
-        <td class="acct">${r.acct}</td><td class="acct">${r.asset}</td>
-        <td class="num ${r.amount.startsWith("-") ? "neg" : ""}">${fmt(r.asset, r.amount)}</td></tr>`).join("")}
-    </tbody></table>` : `<p class="empty">No accounts yet.</p>`;
+  $("balances").innerHTML = rows.length ? `<table class="surface"><tbody>${
+    rows.map(r => `<tr><td>${esc(r.acct)}</td><td style="color:var(--muted)">${esc(r.asset)}</td>` +
+      `<td class="num" style="text-align:right;font-family:var(--mono);color:${+r.amount < 0 ? "var(--red)" : "var(--ink)"}">${fmt(r.amount, r.asset)}</td></tr>`).join("")
+  }</tbody></table>` : `<p class="note" style="margin:0">nothing yet</p>`;
 
-  // match values only. a bare number regex also matches the 2 in "USD/2",
-  // which reads as drift on a perfectly balanced ledger.
-  const drifts = [...bal.matchAll(/:\s*(-?\d+)/g)].map(m => m[1]).filter(v => v !== "0");
-  $("conservation").hidden = false;
-  $("conservation").classList.toggle("broken", drifts.length > 0);
-  $("drift").textContent = drifts.length ? drifts.join(", ") : "0";
-
-  const logs = await fetch(base + "/logs?limit=100").then(r => r.json());
-  const items = logs.items || [];
-  $("log").innerHTML = items.length ? items.map(l => `
-    <div class="entry"><span class="id">${l.id}</span>
-      <span class="type">${l.type.replace(/_/g, " ").toLowerCase()}</span>
-      <span class="hash">${l.hash.slice(0, 10)}…</span></div>`).join("")
-    : `<p class="empty">Nothing has happened yet.</p>`;
-  $("chain").hidden = items.length === 0;
-  $("chaintext").textContent = items.length + " entries, each hashed onto the one before it";
-
-  if (all.items && all.items.length) lastTxId = all.items[all.items.length - 1].id;
+  const logs = await fetch(base() + "/logs?limit=6").then(r => r.json());
+  $("chain").innerHTML = (logs.items || []).length ? `<table class="surface"><tbody>${
+    logs.items.map(l => `<tr><td>${l.id}</td><td style="color:var(--muted)">${esc(l.type)}</td>` +
+      `<td style="font-family:var(--mono);font-size:.72rem;color:var(--green)">${esc(String(l.hash).slice(0, 14))}…</td></tr>`).join("")
+  }</tbody></table>` : `<p class="note" style="margin:0">nothing yet</p>`;
 }
 
-function adopt(name) {
+/* A response body is worth reading, so indent it and cap it rather than
+   pasting 220 characters of one line and trailing an ellipsis. */
+function pretty(text, max = 12) {
+  if (!text) return [];
+  let v;
+  try { v = JSON.parse(text); } catch { return [text]; }
+  const lines = JSON.stringify(v, null, 2).split("\n");
+  if (lines.length <= max) return lines;
+  return [...lines.slice(0, max), "… " + (lines.length - max) + " more lines"];
+}
+
+const STATUS = { 200: "OK", 201: "Created", 204: "No Content", 400: "Bad Request",
+                 404: "Not Found", 409: "Conflict", 422: "Unprocessable" };
+const statusText = c => STATUS[c] || "";
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function fmt(minor, asset) {
+  const m = String(asset).match(/\/(\d+)$/);
+  if (!m) return minor;
+  const scale = +m[1], neg = String(minor).startsWith("-");
+  const digits = String(minor).replace("-", "").padStart(scale + 1, "0");
+  const whole = digits.slice(0, digits.length - scale).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (neg ? "-" : "") + whole + (scale ? "." + digits.slice(-scale) : "");
+}
+
+/* ---------- setup ---------- */
+async function createLedger(narrate) {
+  const name = "demo-" + Math.random().toString(36).slice(2, 7);
+  const r = await call("POST", "/v1/ledgers/" + name);
+  if (!r || !r.ok) return null;
   ledger = name;
-  $("ledgername").textContent = name;
-  document.querySelectorAll("button").forEach(b => b.disabled = false);
-  return refresh();
+  if (narrate) {
+    say("note", "a ledger declares the assets it handles. USD/2 and USD/6 are");
+    say("note", "different assets, so a mistyped scale would be a second currency.");
+  }
+  for (const asset of ["USD/2", "USDT/6"]) await call("POST", base() + "/assets", { asset });
+  history.replaceState(null, "", "?ledger=" + ledger);
+  $("ledgername").textContent = ledger;
+  document.querySelectorAll("button[data-run]").forEach(b => (b.disabled = false));
+  return ledger;
 }
 
 $("setup").onclick = async () => {
-  ledger = "demo-" + Math.random().toString(36).slice(2, 7);
-  const r = await call("POST", "/v1/ledgers/" + ledger);
-  if (!r || !r.ok) return;
-
-  // a ledger declares the assets it may handle before anything can be posted
-  // in them. USD/2 and USD/6 are both well formed and never mix, so a mistyped
-  // scale would otherwise be a second currency rather than an error.
-  await call("POST", "/v1/ledgers/" + ledger + "/assets", { asset: "USD/2" });
-
-  history.replaceState(null, "", "?ledger=" + ledger);
-  await adopt(ledger);
+  $("trace").dataset.fresh = "0";
+  if (!await createLedger(true)) return;
+  await refresh();
 };
 
-async function post(body) {
-  if (!ledger) return;
-  await call("POST", "/v1/ledgers/" + ledger + "/transactions", body);
-  await refresh();
-}
+/* ---------- the runnable example in the API section ----------
+   The docs and the demo talk to the same server, so an example that cannot be
+   sent is an example nobody has checked. */
+$("try-send").onclick = async () => {
+  const btn = $("try-send"), out = $("try-out");
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Sending…";
+  try {
+    if (!ledger && !await createLedger(false)) { out.textContent = "could not create a ledger"; return; }
+    // the example spends alice's money, so she has to have some
+    const short = 13000n - await balanceOf("users:alice", "USD/2");
+    if (short > 0n) await post([P("world", "users:alice", "USD/2", Number(short))]);
 
-document.querySelectorAll("button[data-post]").forEach(b => {
-  b.onclick = () => post(b.dataset.post);
+    const body = {
+      postings: [
+        P("users:alice", "users:bob", "USD/2", 12500),
+        P("users:alice", "fees:platform", "USD/2", 500),
+      ],
+      reference: "inv-" + Math.random().toString(36).slice(2, 7),
+      metadata: { "giro/external.ref": "W-77219" },
+    };
+    const res = await fetch(base() + "/transactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "pay-" + Math.random().toString(36).slice(2, 8) },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    const cls = res.ok ? "ok" : "bad";
+    out.innerHTML = `<span class="${cls}">${res.status} ${esc(statusText(res.status))}</span>  ` +
+      `<span style="color:var(--muted)">· ledger ${esc(ledger)}</span>\n` + esc(pretty(text, 40).join("\n"));
+    await refresh();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+};
+
+document.querySelectorAll("button[data-run]").forEach(btn => {
+  btn.onclick = async () => {
+    if (!ledger) return;
+    await SCENARIOS[btn.dataset.run]();
+    await refresh();
+  };
 });
 
-$("custom").onclick = () => post(JSON.stringify({
-  postings: [{
-    source: $("src").value.trim(),
-    destination: $("dst").value.trim(),
-    asset: $("asset").value.trim(),
-    amount: Number($("amt").value),
-  }],
-}));
-
-$("bignum").onclick = async () => {
-  const huge = "100000000000000000000000000000001";
-  await post('{"postings":[{"source":"world","destination":"treasury:vault","asset":"TOKEN/18","amount":' + huge + '}]}');
-  const shown = $("response").textContent.includes(huge);
-  $("response").textContent =
-    "sent      " + huge + "\n" +
-    "returned  " + (shown ? huge + "   exact\n" : "(see above)\n") +
-    "\nJSON.parse would give " + JSON.parse("[" + huge + "]")[0] +
-    "\nwhich is why the ledger stores arbitrary precision integers,\nand why a browser client needs a big number aware parser.";
-};
-
-$("revert").onclick = async () => {
-  if (!ledger || !lastTxId) return;
-  await call("POST", "/v1/ledgers/" + ledger + "/transactions/" + lastTxId + "/revert");
+/* ?ledger= adopts an existing one, so a populated demo can be linked to */
+(async () => {
+  const named = new URLSearchParams(location.search).get("ledger");
+  if (!named) return;
+  const probe = await fetch("/v1/ledgers/" + named);
+  if (!probe.ok) return;
+  ledger = named;
+  $("ledgername").textContent = ledger;
+  $("trace").textContent = "adopted " + ledger;
+  document.querySelectorAll("button[data-run]").forEach(b => (b.disabled = false));
   await refresh();
-};
-
-document.querySelectorAll("button").forEach(b => { if (b.id !== "setup") b.disabled = true; });
-
-// a ledger in the url is adopted, so a populated demo can be linked to
-const existing = new URLSearchParams(location.search).get("ledger");
-if (existing) adopt(existing);
+})();
 </script>
+
 </body>
 </html>

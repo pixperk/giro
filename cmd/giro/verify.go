@@ -62,6 +62,19 @@ func verifyCommand(ctx context.Context, args []string) error {
 	defer pool.Close()
 
 	names := fs.Args()
+	// Go's flag package stops parsing at the first positional argument, so
+	// "giro verify main --record=false" leaves --record=false in Args and it
+	// would be verified as a ledger of that name -- reporting ok, having
+	// checked nothing, with --record still on. A scheduler cannot tell that
+	// apart from a clean run, which is the one failure this command exists to
+	// make visible.
+	for _, name := range names {
+		if strings.HasPrefix(name, "-") {
+			return usageErr{fmt.Sprintf(
+				"%q looks like a flag but came after a ledger name, so it was not parsed as one.\n"+
+					"flags go first: giro verify %s [ledger...]\n\n%s", name, name, verifyUsage)}
+		}
+	}
 	if len(names) == 0 {
 		if names, err = storage.Ledgers(ctx, pool); err != nil {
 			return err

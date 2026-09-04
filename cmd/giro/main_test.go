@@ -508,3 +508,174 @@ func TestVerifyCommand(t *testing.T) {
 		}
 	})
 }
+
+// Account policy is the one thing giro deliberately gives no endpoint, so the
+// command is the only way to reach it, and a bug here has no second path
+// around it.
+func TestAccountCommand(t *testing.T) {
+	ctx := context.Background()
+	url := isolatedDatabase(t)
+
+	if _, err := captureOutput(t, func() error { return dispatch(ctx, []string{"migrate", "up"}) }); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, "insert into ledgers (name) values ('main')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "insert into assets (ledger, asset) values ('main', 'USD/2')"); err != nil {
+		t.Fatal(err)
+	}
+	store := storage.New(pool, "main")
+
+	run := func(t *testing.T, args ...string) (string, error) {
+		t.Helper()
+		return captureOutput(t, func() error { return dispatch(ctx, append([]string{"account"}, args...)) })
+	}
+
+	// The gap this command exists to close: over HTTP there is no way to make
+	// a boundary account, so an inbound flow from a counterparty cannot be
+	// expressed at all. This is the whole point, so it is the first test.
+	t.Run("a boundary account can receive from outside the ledger", func(t *testing.T) {
+		lp := ledger.Address("external:lp:kraken:USD")
+
+		_, err := store.CommitTransaction(ctx, ledger.Postings{
+			{Source: lp, Destination: "ops:usd", Asset: "USD/2", Amount: big.NewInt(9996)},
+		}, storage.CommitOptions{})
+		if err == nil {
+			t.Fatal("a boundary account went negative before anyone permitted it")
+		}
+
+		if out, err := run(t, "allow-negative", "main", string(lp), "USD/2"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+
+		if _, err := store.CommitTransaction(ctx, ledger.Postings{
+			{Source: lp, Destination: "ops:usd", Asset: "USD/2", Amount: big.NewInt(9996)},
+		}, storage.CommitOptions{}); err != nil {
+			t.Fatalf("still refused after the policy was set: %v", err)
+		}
+	})
+
+	t.Run("show reports the bound beside the balance it governs", func(t *testing.T) {
+		out, err := run(t, "show", "main", "external:lp:kraken:USD")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		for _, want := range []string{"USD/2", "-9996", "unbounded"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output does not mention %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("an untouched account says so rather than inventing a policy", func(t *testing.T) {
+		out, err := run(t, "show", "main", "users:nobody")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "nothing has moved through") {
+			t.Errorf("an account with no rows was described as if it had them:\n%s", out)
+		}
+	})
+
+	// Narrowing a bound an account already sits outside is permitted -- it is
+	// how an operator stops the bleeding -- so nothing refuses it and the
+	// account stays outside its own rule. Being told at the time is the
+	// difference between a decision and a surprise at tomorrow's verify.
+	t.Run("narrowing a bound the account already breaks says so", func(t *testing.T) {
+		out, err := run(t, "refuse-negative", "main", "external:lp:kraken:USD", "USD/2")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "outside that bound") {
+			t.Errorf("the operator was not told the account already breaks the rule:\n%s", out)
+		}
+		if !strings.Contains(out, "giro verify") {
+			t.Errorf("nothing said where this will show up:\n%s", out)
+		}
+
+		// and it is a real finding, not only a warning printed here
+		vout, verr := captureOutput(t, func() error { return dispatch(ctx, []string{"verify", "--record=false"}) })
+		if verr == nil {
+			t.Fatalf("verify passed an account outside its own bound:\n%s", vout)
+		}
+		if !strings.Contains(vout, "balance_permissions") {
+			t.Errorf("the wrong check reported it:\n%s", vout)
+		}
+	})
+
+	t.Run("a cost line is bounded above rather than unbounded", func(t *testing.T) {
+		if out, err := run(t, "allow-negative", "main", "cost:peg", "USD/2"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if out, err := run(t, "refuse-positive", "main", "cost:peg", "USD/2"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		out, err := run(t, "show", "main", "cost:peg")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "cost line") {
+			t.Errorf("the pair of flags was not read as the fact it states:\n%s", out)
+		}
+	})
+
+	// Each of these changes nothing and must say why, because a policy command
+	// that silently succeeds against a typo is worse than one that fails.
+	t.Run("a mistake is refused rather than quietly doing nothing", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"a ledger that does not exist", []string{"show", "nosuch", "users:alice"}, "no ledger"},
+			{"an asset this ledger does not handle", []string{"allow-negative", "main", "users:alice", "USD"}, "does not handle"},
+			{"world may not be bounded below", []string{"refuse-negative", "main", "world", "USD/2"}, "must be allowed a negative"},
+			{"an unknown verb", []string{"frobnicate", "main", "users:alice"}, "unknown account command"},
+			{"too few arguments", []string{"allow-negative", "main", "users:alice"}, "usage"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				out, err := run(t, tc.args...)
+				if err == nil {
+					t.Fatalf("accepted:\n%s", out)
+				}
+				if !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("err = %v, want it to mention %q", err, tc.want)
+				}
+			})
+		}
+	})
+}
+
+// Go's flag package stops parsing at the first positional argument, so a flag
+// written after a ledger name becomes a ledger name. Left alone, "giro verify
+// main --record=false" checks a ledger that does not exist, finds nothing
+// wrong with it, exits zero, and records the run -- which is indistinguishable
+// from a clean pass and is the exact failure this command exists to surface.
+func TestVerifyRefusesAFlagAfterALedgerName(t *testing.T) {
+	ctx := context.Background()
+	isolatedDatabase(t)
+	if _, err := captureOutput(t, func() error { return dispatch(ctx, []string{"migrate", "up"}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := captureOutput(t, func() error {
+		return dispatch(ctx, []string{"verify", "main", "--record=false"})
+	})
+	if err == nil {
+		t.Fatalf("a flag after a ledger name was verified as a ledger:\n%s", out)
+	}
+	var u usageErr
+	if !errors.As(err, &u) {
+		t.Fatalf("err = %v (%T), want usageErr so it exits 2", err, err)
+	}
+	if !strings.Contains(u.text, "flags go first") {
+		t.Errorf("the message does not say how to fix it:\n%s", u.text)
+	}
+}

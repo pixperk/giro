@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation.
+D37–D44 account policy, D45–D50 reconciliation, D51 the operator surface.
 
 ---
 
@@ -1110,3 +1110,53 @@ edge — because "what they hold for us" means something different for a chain, 
 exchange and a bank, while the former means one thing for all three. The
 original wording said the latter, and writing three adapters against it is what
 showed it was ambiguous.
+
+---
+
+### D51. Account policy has a command, not an endpoint
+
+Everything in D37–D44 — which accounts may go negative, which may go positive,
+which are closed — was reachable only from Go. That was the right instinct and
+the wrong stopping point.
+
+The instinct: an endpoint that lets a caller mark its own account unbounded is
+not an API, it is a hole in one. The overdraw guard is what stands between a bug
+and minted money, and permission to disable it must not travel over the same
+wire as the requests it exists to refuse.
+
+The stopping point: a boundary account (D33) has to be permitted a negative
+balance before value can cross inward at it, and nothing over HTTP could permit
+one. So the reconciliation story D45–D50 tells was unreachable from the service,
+and a deployment that ran giro as a server had no path to set up the accounts
+reconciliation is about. The gap was found by writing the documentation and
+noticing that a claim it made could not be carried out.
+
+`giro account` closes it, alongside `giro migrate` and `giro verify`:
+
+```
+giro account show           <ledger> <address>
+giro account allow-negative <ledger> <address> <asset>
+giro account close          <ledger> <address>
+```
+
+**The privilege is not what separates a command from a route.** `giro_app` is
+granted `update` on the policy columns and always was, because the commit path
+needs the row; the command reaches the same database with the same role. The
+channel is what separates them. A command is reached by someone with a shell or
+a deployment step, and there is no listener in front of it accepting requests
+from anywhere. That is what makes the setting a decision somebody took rather
+than one a request could take for them.
+
+Two consequences, both deliberate. Serving giro and operating it are two jobs,
+and a deployment needs a path to the second — a task runner, a job, a migration
+step. And a boundary account is declared rather than named into being: the
+`external:` prefix is convention, and value cannot cross inward at an edge
+nobody opened.
+
+`show` reports the bound beside the balance it governs, because "unbounded
+below" reads differently on an account at zero and one at minus four hundred
+thousand. Narrowing a bound an account already sits outside is permitted — it is
+how an operator stops the bleeding, and refusing it would leave the only remedy
+blocked by the thing it remedies — so the command says at the time that the
+account now breaks its own rule, and that `giro verify` will report it until
+something moves.

@@ -21,6 +21,7 @@ tx, err := store.CommitTransaction(ctx, ledger.Postings{
 - **Two clocks.** What was true on the 3rd stays answerable after a settlement
   file arrives on the 7th.
 - **Nine checks** you can schedule, each of which reports what it examined.
+  Seven run unconditionally; two more need the window you consider stale.
 
 One direct dependency: the Postgres driver.
 
@@ -97,7 +98,9 @@ curl -X POST $L/transactions -H 'Content-Type: application/json' -d '{
     {"source": "users:alice", "destination": "users:bob", "asset": "USD/2", "amount": 999999}
   ]
 }'
-# 422  {"code":"INSUFFICIENT_FUNDS","message":"users:alice holds 10000 USD/2, needs 999999"}
+# 422  {"code":"INSUFFICIENT_FUNDS",
+#        "details":{"account":"users:alice","asset":"USD/2","available":"10000","requested":"999999"},
+#        "message":"insufficient funds: users:alice holds 10000 USD/2, needs 999999"}
 ```
 
 ### 6. Check the book
@@ -106,8 +109,12 @@ curl -X POST $L/transactions -H 'Content-Type: application/json' -d '{
 just verify
 ```
 
-Nine checks, each reporting what it examined. `giro verify --last --max-age=25h`
-is the other half: it fails if a check has *stopped* running.
+Seven checks, each reporting what it examined. Two more run when you say what
+counts as stale — `giro verify --stale-after=4h --recon-after=4h` — because
+neither has a default anyone else can choose for you.
+
+`giro verify --last --max-age=25h` is the other half: it fails if a check has
+*stopped* running.
 
 `just` on its own lists every recipe. `just check` runs `fmt`, `vet`, `lint`,
 `test` and `test-restricted` — everything CI runs, including the whole suite as
@@ -122,7 +129,17 @@ giro migrate status            what has run and what has not
 giro migrate new <name>        create an empty migration
 giro verify [ledger...]        run every check, record that they ran
 giro verify --last             when each check last ran
+giro account show <l> <addr>   how an account is bounded, per asset
+giro account allow-negative    permit a negative balance, one asset at a time
+giro account close  <l> <addr> take an account out of service
 ```
+
+Flags come before the ledger names, and `giro verify` refuses one written
+after — a flag parsed as a ledger name would check a ledger that does not
+exist, find nothing wrong with it, and exit zero.
+
+`giro account` is the only way to set account policy, and that is deliberate:
+see [What has no HTTP API](#what-has-no-http-api).
 
 `giro migrate` reads `GIRO_MIGRATE_DATABASE_URL` in preference to
 `DATABASE_URL`, so the owner's credential stays out of the serving environment.
@@ -236,7 +253,6 @@ GET    /v1/ledgers/{ledger}/accounts/{address}/balances   ?at=
 GET    /v1/ledgers/{ledger}/accounts/{address}/moves      statement, ?asset= &from= &to=
 POST   /v1/ledgers/{ledger}/accounts/{address}/metadata
 DELETE /v1/ledgers/{ledger}/accounts/{address}/metadata/{key}
-GET    /v1/ledgers/{ledger}/accounts/{address}/balances
 GET    /v1/ledgers/{ledger}/balances                 ?prefix=users:
 GET    /v1/ledgers/{ledger}/logs                     the audit trail
 ```
@@ -259,12 +275,39 @@ The two differ whenever a transaction has been backdated, which for anything
 taking settlement files from the outside world is most of the time.
 
 ---
+
+### What has no HTTP API
+
+A good deal of what giro does is reachable only from Go or from the CLI. None
+of it is an oversight, and the reasons differ.
+
+| Capability | Where | Why not over HTTP |
+|---|---|---|
+| Account bounds, closure | `giro account`, library | These are the switches that turn the guards off. An endpoint letting a caller mark its own account unbounded is not an API, it is a hole in one — the overdraw guard stands between a bug and minted money, and permission to disable it should not travel over the same wire as the requests it protects against. |
+| The checks | `giro verify`, library | Each is a full pass over a table: behind an endpoint they are a denial of service anyone can trigger, and they answer a question nobody asks mid-request. They belong on a schedule that records that it ran. |
+| [`recon`](recon/) | library | Reconciliation needs a `Source`, and you cannot pass an implementation of an interface over HTTP. The adapter has to live in a process that can run your code. |
+| [`fx`](fx/) | library | Not an operation. It builds the postings a conversion needs from the rate you state, and you commit them through the ordinary transactions endpoint. |
+| `migrate` | `giro migrate`, library | Schema changes take a session lock and must connect directly to Postgres rather than through a pooler. A serving process should not be able to change the schema, or to claim it changed one. |
+
+The line is the same in every row: **the API is for moving money, and
+everything else is not.** Setup, policy and inspection are operator work, done
+by something with a shell or a deployment, not by whatever is holding an HTTP
+connection.
+
+The privilege is not what separates them — `giro_app` is granted `update` on
+the policy columns and always was, because the commit path needs the row. The
+channel is. So if you run giro as a service you still need a path to run
+`giro account` and `giro verify`: a job, a task runner, a deployment step.
+Serving it and operating it are two jobs.
+
+---
 ---
 
 ## The data model
 
-Six tables. Every one carries `ledger` as the first element of its key, so the
-tenant boundary is structural rather than something each query has to remember.
+Eleven tables, of which these six carry the ledger itself. Every one carries
+`ledger` as the first element of its key, so the tenant boundary is structural
+rather than something each query has to remember.
 
 ```mermaid
 erDiagram
@@ -320,6 +363,14 @@ The same facts live at three grains, and each answers a different question.
 | `transactions` | per transaction | what was submitted, verbatim |
 | `moves` | per account per posting | what did this account do, and when |
 | `accounts_volumes` | per account per asset | what is the balance now |
+
+The other five are not the ledger; they are what surrounds it.
+
+| Table | Holds |
+|---|---|
+| `assets` | Which assets this ledger handles, one scale per currency. A foreign key from `accounts_volumes`, which is what stops a mistyped `USDD/2` becoming a second currency holding real money (D18). |
+| `verification_runs` | That a check ran, when, and what it found — so a scheduler that stopped can be told apart from a book with nothing wrong. |
+| `recon_sources`, `recon_records`, `recon_matches` | What the outside world said, and which movement each line was paired with. Written by [`recon`](recon/), never by the commit path. |
 
 ---
 ---
@@ -392,8 +443,9 @@ other check reads the projection, so a consistent lie passes them all.
 | | |
 |---|---|
 | [deploy/](deploy/) | Scheduling the checks: cron, systemd, Kubernetes, and what to page on |
-| `giro verify` | Nine checks. Exits non-zero on a finding. |
+| `giro verify` | Seven checks, nine with `--stale-after` and `--recon-after`. Exits non-zero on a finding. |
 | `giro verify --last --max-age=25h` | Fails if a check has stopped running |
+| `giro account` | Account bounds and closure. No endpoint, by design. |
 | `just privileges` | What the serving connection can actually do |
 | `just db-sweep` | Drop test schemas an interrupted run left behind |
 | `just replay SEED` | Reproduce a property test failure from its printed seed |
