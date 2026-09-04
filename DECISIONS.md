@@ -661,7 +661,7 @@ So it moves into a holding account and out again.
 
 ```
 submitted   client:acme                 -> pending:wire:WR-2026-0142
-settled     pending:wire:WR-2026-0142   -> external:bank:infinitus:USD
+settled     pending:wire:WR-2026-0142   -> external:bank:northwind:USD
 returned    pending:wire:WR-2026-0142   -> client:acme
 ```
 
@@ -676,12 +676,12 @@ properties fall out of what is already here:
   once, so a second settlement overdraws an account nobody permitted and is
   refused. A partial settlement works naturally: move part, the rest stays.
 
-**Rejected: a status column on the transaction.** It is what most systems do
-and one of them is instructive. The ledger this borrows from has
-`pending`/`settled` on every leg, and the status does not affect balances at
-all: the trigger accumulates every leg regardless, so a pending leg is already
-spendable. It is a label, not a mechanism, which is why their own notes say
-"reserve now, settle later" is not expressible.
+**Rejected: a status column on the transaction.** It is what most ledgers do,
+and the trap in it is that a status is easy to add and easy to leave
+disconnected from the arithmetic. A `pending` flag that does not affect the
+balance is a label rather than a mechanism: the money is already spendable and
+the flag only says somebody meant it not to be. Making it real means the
+balance calculation has to branch on it, everywhere, for ever.
 
 A status would also need a mutable money table, and after D35 there is no such
 thing.
@@ -691,8 +691,9 @@ thing.
 expiry. It is the stronger model and it is the right one for card
 authorisation, where the money has not moved and merely must not be spendable.
 That is a different problem from money in flight, where the money genuinely has
-left, and it would be a schema change, a second conservation story and a second
-verifier for a capability this business does not have.
+left. Adopting it would mean a schema change, a second conservation story and a
+second verifier, for a capability a ledger only needs once it is authorising
+against funds rather than moving them.
 
 **What the convention does not give you is a timeout**, and that is the one
 thing worth building. A wire that neither settles nor returns leaves money in
@@ -1098,10 +1099,11 @@ and the money is missing.
 position across the shared edge, and it is compared against the boundary account
 standing for it.
 
-giro is unusually well placed for this. A boundary account per counterparty and
-asset (D33) means our side of the comparison is already a balance rather than a
-report to be assembled. The ledger this borrows from cannot do it at all,
-because it deliberately does not materialise its boundary accounts.
+A boundary account per counterparty and asset (D33) is what makes this cheap:
+our side of the comparison is already a balance rather than a report to be
+assembled. A design that leaves boundary accounts unmaterialised — a reasonable
+trade, since a busy edge is otherwise a hot row — cannot do this at all, and
+that cost is worth knowing before making it.
 
 The sign convention is stated from our side — what has come to us across this
 edge — because "what they hold for us" means something different for a chain, an

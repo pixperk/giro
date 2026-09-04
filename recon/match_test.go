@@ -16,7 +16,7 @@ import (
 
 // The bank account money leaves through, and the chain it arrives over.
 const (
-	bank  = ledger.Address("external:bank:infinitus:USD")
+	bank  = ledger.Address("external:bank:northwind:USD")
 	chain = ledger.Address("external:chain:tron:USDT")
 )
 

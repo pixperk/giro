@@ -35,7 +35,7 @@ func TestMoneyInFlightIsInNeitherAccount(t *testing.T) {
 	}
 	// the bank has no row at all rather than a zero one: nothing has reached
 	// it, which is a stronger statement than a balance of nothing
-	atBank, err := s.GetBalances(ctx, "external:bank:infinitus:USD")
+	atBank, err := s.GetBalances(ctx, "external:bank:northwind:USD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestMoneyInFlightIsInNeitherAccount(t *testing.T) {
 
 	// settled.
 	commit(t, ctx, s, "wire-settled", ledger.Postings{
-		{Source: wire, Destination: "external:bank:infinitus:USD", Asset: "USD/2", Amount: n(99_725_00)},
+		{Source: wire, Destination: "external:bank:northwind:USD", Asset: "USD/2", Amount: n(99_725_00)},
 	})
 
 	if got := balance(t, ctx, pool, wire, "USD/2"); got.Sign() != 0 {
@@ -88,11 +88,11 @@ func TestAWireCannotBeSettledTwice(t *testing.T) {
 		{Source: "client:acme", Destination: wire, Asset: "USD/2", Amount: n(99_725_00)},
 	})
 	commit(t, ctx, s, "wire-settled", ledger.Postings{
-		{Source: wire, Destination: "external:bank:infinitus:USD", Asset: "USD/2", Amount: n(99_725_00)},
+		{Source: wire, Destination: "external:bank:northwind:USD", Asset: "USD/2", Amount: n(99_725_00)},
 	})
 
 	_, err := s.CommitTransaction(ctx, ledger.Postings{
-		{Source: wire, Destination: "external:bank:infinitus:USD", Asset: "USD/2", Amount: n(99_725_00)},
+		{Source: wire, Destination: "external:bank:northwind:USD", Asset: "USD/2", Amount: n(99_725_00)},
 	}, CommitOptions{Reference: "wire-settled-again"})
 
 	var insufficient *InsufficientFundsError
@@ -119,7 +119,7 @@ func TestValueInTransitIsOneRead(t *testing.T) {
 		{Source: "client:beta", Destination: "pending:wire:B1", Asset: "USD/2", Amount: n(12_400_00)},
 	})
 	commit(t, ctx, s, "acme-settled", ledger.Postings{
-		{Source: "pending:wire:A1", Destination: "external:bank:infinitus:USD", Asset: "USD/2", Amount: n(99_725_00)},
+		{Source: "pending:wire:A1", Destination: "external:bank:northwind:USD", Asset: "USD/2", Amount: n(99_725_00)},
 	})
 
 	inTransit, err := s.AggregateBalances(ctx, "pending:")
@@ -186,7 +186,7 @@ func TestASettledWireIsNotStale(t *testing.T) {
 		{Source: "client:acme", Destination: wire, Asset: "USD/2", Amount: n(99_725_00)},
 	})
 	commit(t, ctx, s, "wire-settled", ledger.Postings{
-		{Source: wire, Destination: "external:bank:infinitus:USD", Asset: "USD/2", Amount: n(99_725_00)},
+		{Source: wire, Destination: "external:bank:northwind:USD", Asset: "USD/2", Amount: n(99_725_00)},
 	})
 
 	stuck, err := s.StaleBalances(ctx, "pending:", 0)

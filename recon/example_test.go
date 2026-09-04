@@ -19,8 +19,8 @@ import (
 // accounts.
 type bankStatement struct{}
 
-func (bankStatement) ID() string   { return "infinitus" }
-func (bankStatement) Name() string { return "Infinitus Pay" }
+func (bankStatement) ID() string   { return "northwind" }
+func (bankStatement) Name() string { return "Northwind Bank" }
 
 func (bankStatement) Fetch(ctx context.Context, since time.Time) ([]recon.Record, error) {
 	// in a real adapter: call the API, map its rows. returning a line you have
@@ -58,7 +58,7 @@ func Example() {
 
 	// the boundary account stands for the bank, and is permitted a negative
 	// balance because it is the outside world's side of the book
-	const atBank = ledger.Address("external:bank:infinitus:USD")
+	const atBank = ledger.Address("external:bank:northwind:USD")
 	if err := s.SetAllowNegative(ctx, atBank, "USD/2", true); err != nil {
 		log.Fatal(err)
 	}

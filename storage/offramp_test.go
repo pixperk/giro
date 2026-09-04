@@ -38,7 +38,7 @@ const (
 	chainTron  = "external:chain:tron:USDT"
 	krakenUSDT = "external:lp:kraken:USDT"
 	krakenUSD  = "external:lp:kraken:USD"
-	bank       = "external:bank:infinitus:USD"
+	bank       = "external:bank:northwind:USD"
 )
 
 // Boundary accounts stand for something outside the ledger, and contra

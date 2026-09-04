@@ -23,8 +23,8 @@ The only thing you implement. It calls somebody's API and maps the answer onto
 ```go
 type bankStatement struct{}
 
-func (bankStatement) ID() string   { return "infinitus" }
-func (bankStatement) Name() string { return "Infinitus Pay" }
+func (bankStatement) ID() string   { return "northwind" }
+func (bankStatement) Name() string { return "Northwind Bank" }
 
 func (bankStatement) Fetch(ctx context.Context, since time.Time) ([]recon.Record, error) {
 	rows, err := myBankClient.Statement(ctx, since)
@@ -56,7 +56,7 @@ recon.Register(ctx, pool, "main", source)
 
 // the boundary account standing for the bank. permitted a negative balance
 // because it is the outside world's side of the book.
-const atBank = ledger.Address("external:bank:infinitus:USD")
+const atBank = ledger.Address("external:bank:northwind:USD")
 s.SetAllowNegative(ctx, atBank, "USD/2", true)
 ```
 
@@ -288,7 +288,7 @@ asset:
 ```
 external:chain:tron:USDT
 external:lp:kraken:USD
-external:bank:infinitus:USD
+external:bank:northwind:USD
 ```
 
 That is the default. A ledger that names its edges differently says so once:
@@ -388,7 +388,7 @@ transaction, and deciding to make one is a person's job.
 
 ```
 recon/            the mechanism. imports ledger and storage. no provider knowledge.
-your repo/        kraken, infinitus, tron adapters. a few dozen lines each.
+your repo/        kraken, northwind, tron adapters. a few dozen lines each.
 ```
 
 The moment a ledger ships a Kraken client it stops being a general ledger. What

@@ -27,7 +27,7 @@ import (
 const (
 	atTron   = ledger.Address("external:chain:tron:USDT")
 	atKraken = ledger.Address("external:lp:kraken:USD")
-	atPayer  = ledger.Address("external:bank:infinitus:USD")
+	atPayer  = ledger.Address("external:bank:northwind:USD")
 )
 
 // a fixed set of lines, which is what an adapter returns once it has mapped
@@ -139,7 +139,7 @@ func TestADayOfOffRampsReconciles(t *testing.T) {
 	}
 
 	// ── the bank: ONE line for all three payouts ──
-	bankSource := &statement{id: "infinitus", name: "Infinitus Pay", lines: []recon.Record{{
+	bankSource := &statement{id: "northwind", name: "Northwind Bank", lines: []recon.Record{{
 		ID: "stmt-1", Reference: "WIRE-0142",
 		Asset: "USD/2", Amount: big.NewInt(wired), Direction: recon.Out,
 	}}}
@@ -167,7 +167,7 @@ func TestADayOfOffRampsReconciles(t *testing.T) {
 	var rows, setSize int
 	if err := pool.QueryRow(ctx, `
 		select count(*), max(set_size) from recon_matches
-		 where ledger='main' and source='infinitus'`).Scan(&rows, &setSize); err != nil {
+		 where ledger='main' and source='northwind'`).Scan(&rows, &setSize); err != nil {
 		t.Fatal(err)
 	}
 	if rows != 3 || setSize != 3 {
@@ -208,7 +208,7 @@ func TestTheDirectionTrap(t *testing.T) {
 		{Source: atPayer, Destination: "ops:usd", Asset: "USD/2", Amount: big.NewInt(50_000_00)},
 	})
 
-	bank := &statement{id: "infinitus", name: "Infinitus Pay", lines: []recon.Record{{
+	bank := &statement{id: "northwind", name: "Northwind Bank", lines: []recon.Record{{
 		ID: "stmt-out", Reference: "REF-9",
 		Asset: "USD/2", Amount: big.NewInt(50_000_00), Direction: recon.Out,
 	}}}
@@ -311,7 +311,7 @@ func TestADepositTheSourceNeverMentions(t *testing.T) {
 func TestALineForAPaymentWeNeverMade(t *testing.T) {
 	ctx, _, pool := book(t)
 
-	bank := &statement{id: "infinitus", name: "Infinitus Pay", lines: []recon.Record{{
+	bank := &statement{id: "northwind", name: "Northwind Bank", lines: []recon.Record{{
 		ID: "stmt-ghost", Reference: "WIRE-NOBODY-MADE",
 		Asset: "USD/2", Amount: big.NewInt(12_000_00), Direction: recon.Out,
 	}}}
