@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pixperk/giro/fx"
+	"github.com/pixperk/giro/recon"
 	"github.com/pixperk/giro/storage"
 )
 
@@ -19,6 +20,9 @@ const verifyUsage = `usage:
 
   --stale-prefix=PREFIX        accounts to check for money sitting still
   --stale-after=DURATION       how long is too long, for example 4h. 0 skips it
+  --recon-after=DURATION       match staged statement lines, then report any
+                               still unmatched after this. 0 skips it
+  --boundary=PREFIX            which accounts face outward, default external:
   --record=false               do not write a verification_runs row
   --last                       report when each check last ran, and exit
 
@@ -33,6 +37,8 @@ func verifyCommand(ctx context.Context, args []string) error {
 
 	stalePrefix := fs.String("stale-prefix", "pending:", "")
 	staleAfter := fs.Duration("stale-after", 0, "")
+	reconAfter := fs.Duration("recon-after", 0, "")
+	boundary := fs.String("boundary", "", "")
 	record := fs.Bool("record", true, "")
 	last := fs.Bool("last", false, "")
 	if err := fs.Parse(args); err != nil {
@@ -74,12 +80,7 @@ func verifyCommand(ctx context.Context, args []string) error {
 			StalePrefix: *stalePrefix,
 			StaleAfter:  *staleAfter,
 			Record:      *record,
-			Extra: []storage.NamedCheck{{
-				Name: "conversions",
-				Run: func(ctx context.Context) (int, error) {
-					return fx.Verify(ctx, pool, name, fx.DefaultTolerance)
-				},
-			}},
+			Extra:       extraChecks(pool, name, *reconAfter, *boundary),
 		})
 		// print what did run before returning, so a failure to record does not
 		// swallow the findings that were the point of running
@@ -133,4 +134,34 @@ func reportLastRun(ctx context.Context, pool *pgxpool.Pool, names []string) erro
 		}
 	}
 	return nil
+}
+
+// Checks contributed by layers above the engine.
+//
+// The engine has no idea two postings are a trade or that a statement line
+// describes one of its movements, so neither check can live inside it without
+// teaching it what those things are. Here they are just checks with names, and
+// they are recorded alongside the rest because an operator wants one answer to
+// "is the book sound" rather than one per package.
+func extraChecks(pool *pgxpool.Pool, name string, reconAfter time.Duration, boundary string) []storage.NamedCheck {
+	checks := []storage.NamedCheck{{
+		Name: "conversions",
+		Run: func(ctx context.Context) (int, error) {
+			return fx.Verify(ctx, pool, name, fx.DefaultTolerance)
+		},
+	}}
+
+	// off unless asked for. a ledger with no sources registered has nothing to
+	// reconcile against, and a check that always reports nothing teaches an
+	// operator to ignore it.
+	if reconAfter > 0 {
+		checks = append(checks, storage.NamedCheck{
+			Name: "reconciliation",
+			Run: func(ctx context.Context) (int, error) {
+				return recon.Check(ctx, pool, name,
+					recon.Config{BoundaryPrefix: boundary}, reconAfter)
+			},
+		})
+	}
+	return checks
 }

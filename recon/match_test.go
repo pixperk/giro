@@ -2,6 +2,7 @@ package recon_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -277,5 +278,105 @@ func TestTheBoundaryPrefixIsConfigurable(t *testing.T) {
 	}
 	if sum.Matched != 1 {
 		t.Errorf("summary = %+v, want the configured prefix to match", sum)
+	}
+}
+
+// A source that can also state its own position. A chain can answer this and a
+// statement file cannot, which is why it is a separate interface.
+type krakenWithBalance struct {
+	kraken
+	holds *big.Int
+}
+
+func (k *krakenWithBalance) Balance(ctx context.Context, asset ledger.Asset) (*big.Int, error) {
+	return k.holds, nil
+}
+
+// Matching can only pair the lines a source actually sent. If a source never
+// mentions a movement at all, every line it did send matched and the report is
+// clean. Comparing the whole position is what closes that.
+func TestABalanceCatchesWhatMatchingCannot(t *testing.T) {
+	ctx, s, pool := setup(t)
+
+	// we received a hundred thousand over the chain
+	if _, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: chain, Destination: "treasury:usdt", Asset: "USDT/6",
+			Amount: new(big.Int).Mul(big.NewInt(100_000), big.NewInt(1_000_000))},
+	}, storage.CommitOptions{Reference: "DEP-1",
+		Metadata: ledger.Metadata{recon.ExternalRefKey: "DEP-1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// and the chain agrees
+	agreeing := &krakenWithBalance{holds: new(big.Int).Mul(big.NewInt(100_000), big.NewInt(1_000_000))}
+	got, err := recon.CompareBalance(ctx, pool, "main", agreeing, chain, "USDT/6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Agrees() {
+		t.Errorf("positions disagree when they should not: %s", got.Error())
+	}
+
+	// now it does not, and matching would have said nothing at all: no line was
+	// sent, so no line failed to match
+	disagreeing := &krakenWithBalance{holds: new(big.Int).Mul(big.NewInt(99_000), big.NewInt(1_000_000))}
+	got, err = recon.CompareBalance(ctx, pool, "main", disagreeing, chain, "USDT/6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agrees() {
+		t.Fatal("a thousand missing went unnoticed")
+	}
+	if got.Difference.Cmp(new(big.Int).Mul(big.NewInt(-1_000), big.NewInt(1_000_000))) != 0 {
+		t.Errorf("difference = %s, want -1,000 USDT", got.Difference)
+	}
+	t.Logf("reported: %s", got.Error())
+}
+
+// A queue nobody looks at is the failure reconciliation exists to prevent.
+func TestUnmatchedLinesAgeIntoFindings(t *testing.T) {
+	ctx, _, pool := setup(t)
+	if _, err := recon.Ingest(ctx, pool, "main", "kraken",
+		[]recon.Record{line("L1", "NOWHERE", 5_000, recon.Out)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// a line staged moments ago has not failed to reconcile, it simply has not
+	// been reconciled yet
+	checked, err := recon.Unmatched(ctx, pool, "main", time.Hour)
+	if err != nil {
+		t.Errorf("a fresh line was reported as a break: %v", err)
+	}
+	if checked != 1 {
+		t.Errorf("examined %d staged lines, want 1", checked)
+	}
+
+	// with no grace period it is exactly what is outstanding
+	var stale recon.StaleBreak
+	if _, err := recon.Unmatched(ctx, pool, "main", 0); !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want StaleBreak", err)
+	}
+	if stale.RecordID != "L1" || stale.Reference != "NOWHERE" {
+		t.Errorf("reported %+v", stale)
+	}
+}
+
+// Check matches first and then reports, because a check that reports breaks
+// without trying to resolve them is reporting the state of the last run.
+func TestCheckMatchesBeforeReporting(t *testing.T) {
+	ctx, s, pool := setup(t)
+	pay(t, ctx, s, "client:acme", 99_725_00, "WIRE-1")
+	if _, err := recon.Ingest(ctx, pool, "main", "kraken",
+		[]recon.Record{line("L1", "WIRE-1", 99_725_00, recon.Out)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// nobody has run Match, and Check still reports clean because it runs one
+	checked, err := recon.Check(ctx, pool, "main", recon.Config{}, 0)
+	if err != nil {
+		t.Fatalf("a line that matches was reported as outstanding: %v", err)
+	}
+	if checked != 1 {
+		t.Errorf("examined %d, want 1", checked)
 	}
 }
