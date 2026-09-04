@@ -69,14 +69,33 @@ enough to prove, later, that a restore landed where you think it did.
 ledger go backwards". A number and a hash answer the question that matters: *is
 transaction 4291 still the same transaction it was?*
 
-Run this hourly, alongside `giro verify`. The most recent one you trust is what
-you will compare against.
+**Record it far more often than you take backups, and always use the latest
+one.** This is the step a rehearsal catches you on. The check can only detect
+loss that happened *after* the position it is given — so a tip recorded before
+the backup was taken is present in the backup by definition, will always come
+back `ok`, and proves nothing. The interval between recordings is your
+detection granularity. Hourly is a floor; every few minutes costs nothing.
+
+Ship every one of them. During an incident you want the newest tip that exists
+anywhere, not the one that happens to be in the runbook.
 
 ### 2. Take backups Postgres can restore consistently
 
 Physical base backup plus archived WAL, giving you point-in-time recovery. Not
 a per-table dump: giro's invariants are cross-table, and a backup that captured
-`accounts_volumes` but not `logs` restores a book that fails conservation.
+`accounts_volumes` but not `logs` restores a book that fails conservation. A
+whole-database `pg_dump` is consistent — it runs in one snapshot — and is a
+valid fallback, but it is not point-in-time.
+
+**Match your client tools to the server version.** `pg_dump` refuses to dump a
+server newer than itself, which is the sort of thing you find out during an
+incident rather than before one if you have never tried. Managed Postgres is
+upgraded for you, so this breaks without anyone changing anything:
+
+```bash
+pg_dump --version    # must be >= the server
+psql "$DATABASE_URL" -tAc "show server_version"
+```
 
 Your RPO is how much money you are willing to look for by hand. For a ledger,
 aim at zero and expect to be wrong.
@@ -109,6 +128,12 @@ It does **not** tell you it is the right database.
 ```bash
 giro recover check main:4291:3f4WLTEnfJp93aSndGTqdTjg547dZIt-5uyF9raDO4g
 ```
+
+**Use the newest tip you have**, not the one from around the backup. A tip
+recorded before the backup point is inside the backup, so it will answer `ok`
+on a restore that lost hours of transactions. The check tells you whether the
+restore lost anything *you had already recorded*; step 4 is what finds the
+rest.
 
 Three answers:
 
@@ -214,11 +239,14 @@ be able to do to itself.
 ## A checklist for the incident
 
 ```
+[ ] check pg_dump/pg_restore version >= the server version
 [ ] stop writes. every step below is invalid if something is committing.
 [ ] restore, and note the restore point
 [ ] giro verify --record=false          → is the book sound
-[ ] giro recover check <recorded tip>   → is it the book we had
-[ ] giro recover resume <recorded tip>  → only if behind, and before any write
+[ ] giro recover check <NEWEST tip>     → is it the book we had.
+                                          the newest, not the one near the
+                                          backup: that one always says ok
+[ ] giro recover resume <newest tip>    → only if behind, and before any write
 [ ] recon against every counterparty for the gap window
 [ ] re-apply the gap with the original idempotency keys
 [ ] giro verify && giro recover tip     → record the new position
@@ -229,3 +257,29 @@ be able to do to itself.
 The last line is not ceremony. Six months from now the `RECOVERY` entry in the
 log will name a range of ids and nothing else, and somebody will want to know
 what was in it.
+
+---
+
+## Rehearsal log
+
+Last run against a hosted Postgres 18.6, backed up with `pg_dump -Fc`, restored
+into a fresh database, and taken through every step above.
+
+**Worked as documented:** the restore verified clean; `recover check` against
+the newest tip reported the loss and exited non-zero; `recover resume` declared
+ids 5-7 and the chain verified across the gap; the three lost payments
+re-applied under their original idempotency keys, and re-applying them a second
+time returned the same transaction ids rather than paying anyone twice. Every
+balance in the recovered book matched the original.
+
+**Found by the rehearsal, and since fixed here:**
+
+- Checking against the tip recorded *around the backup* returns `ok` on a
+  restore that lost three payments, because that tip is inside the backup. The
+  procedure now says to use the newest tip, and to record tips far more often
+  than backups are taken.
+- `pg_dump` refuses to dump a server newer than itself. A managed provider
+  upgrades the server without anybody changing anything, so this breaks quietly
+  between incidents. It is now the first line of the checklist.
+
+Neither was findable by reading. Both took twenty minutes to find by doing.

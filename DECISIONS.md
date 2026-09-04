@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal.
 
 ---
 
@@ -1397,3 +1397,36 @@ is **correct** through a transaction pooler over a hostile network. Conservation
 the hash chain and the projection all verified after concurrent writers at
 279ms, with zero retries, and prepared statements worked through PgBouncer as
 D36 requires. Slow, and right.
+
+---
+
+### D56. The recovery procedure was rehearsed, and the rehearsal found a hole in it
+
+D54 built the mechanism. This is what happened when it was run against a real
+hosted Postgres, a real `pg_dump`, and a real restore into a fresh database.
+
+The mechanism worked. The restore verified clean, `recover resume` declared the
+gap, the chain verified across it, the three lost payments were re-applied
+under their original idempotency keys — twice, deliberately — and the recovered
+book matched the original balance for balance.
+
+**The procedure did not.** Following it literally, an operator compares the
+restore against the tip their hourly job recorded. That tip was recorded
+*before* the backup was taken, so it is inside the backup by definition, so the
+check answers `ok` — on a restore that had just lost three payments. They would
+then start writing and reuse those ids, which is the exact failure the whole
+mechanism exists to prevent.
+
+The check can only ever detect loss after the position it is given. So the
+guidance is now: **record the tip far more often than you take backups, and
+always compare against the newest one you have.** The interval between
+recordings is the detection granularity, and it should be much finer than the
+backup interval. What the check cannot see, reconciliation finds.
+
+The rehearsal also found that `pg_dump` refuses to dump a server newer than
+itself, and that a managed provider upgrades the server without anybody
+changing anything — so the tooling version is a thing that breaks quietly
+between incidents. It is now a pre-flight step.
+
+Neither of these was findable by reasoning. Both were findable in twenty
+minutes by doing it once, which is the argument for doing it on a schedule.
