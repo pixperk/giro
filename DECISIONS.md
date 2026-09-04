@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining.
 
 ---
 
@@ -1430,3 +1430,56 @@ between incidents. It is now a pre-flight step.
 
 Neither of these was findable by reasoning. Both were findable in twenty
 minutes by doing it once, which is the argument for doing it on a schedule.
+
+---
+
+### D57. Pipelining, and why every performance conclusion from a laptop was wrong
+
+D55 said a commit was nine round trips and that distance dominates. Both halves
+needed correcting, and the correction is the interesting part.
+
+**The count was wrong because the instrument was wrong.** The tracer implemented
+`TraceQueryStart` only, so `SendBatch` — a pipelined batch, one round trip
+carrying several statements — was counted as nothing at all. A commit was
+eleven round trips, not nine. Every number quoted before this was measured with
+an instrument that could not see a third of the traffic.
+
+**The conclusion was wrong because loopback hides the thing being measured.**
+Locally, a hot source account costs 8% against disjoint accounts, which said
+account contention barely mattered and the ledger row was the ceiling. That is
+a localhost artifact: at 28us a round trip, neither lock's hold time matters
+next to the real work Postgres does inside it. At 44ms — a database one region
+away, which is every real deployment — the same comparison is **69%**, because
+the hold time is now round trips and the account lock spans more of the commit
+than the ledger lock does. The account lock is taken at the third statement and
+the ledger lock at the sixth; both are held to COMMIT.
+
+So the lever is the number of round trips **between taking a lock and
+committing**, and the fix is pipelining rather than doing less:
+
+- The row materialisation, the `FOR UPDATE`, and the closure lookup are one
+  batch. They must run in that order and they do — a batch executes in sequence
+  on the server inside the same transaction, so the locking semantics are
+  identical and only the number of client waits changes.
+- Everything written after the transaction row — the account upserts, the
+  moves, and the backdating shift — is one batch instead of three.
+- The effective-volumes read moved above the id allocation, which is safe
+  because `lockVolumes` already holds `FOR UPDATE` on every pair it reads: a
+  transaction that could insert a move we would miss is one that overlaps our
+  accounts, and it is blocked on those locks.
+
+Eleven round trips to nine, and measured against Postgres 44ms away:
+
+| four writers | before | after |
+|---|---|---|
+| disjoint accounts | 3.44 tx/s | **5.32 tx/s** |
+| one hot account | 2.04 tx/s | **3.00 tx/s** |
+
+Single commit latency fell from 581ms to 410ms. Locally the same change is
+invisible, which is the whole point: **a laptop cannot measure this class of
+improvement, and will confidently tell you it does not exist.**
+
+A hot account still costs 44% after all of it, so sharding one across sub-rows
+remains worth roughly 1.8x for that workload — the log is already the source of
+truth and the volumes already a projection, so the pattern fits without
+weakening anything.

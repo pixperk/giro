@@ -32,16 +32,13 @@ import (
 // balance as of this transaction's timestamp rather than from the current one,
 // and every move that already sits later in effective order is shifted by this
 // transaction's delta.
-func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transaction, before map[key]locked, updates []ledger.VolumeUpdate) error {
-	effectiveBefore, err := s.effectiveVolumesAt(ctx, tx, updates, t.Timestamp)
-	if err != nil {
-		return err
-	}
-
+// queueMoves adds this transaction's moves, and the effective-volume shift a
+// backdated transaction forces on the moves after it, and reports how many
+// results they will produce.
+func (s *Store) queueMoves(batch *pgx.Batch, t *ledger.Transaction, before map[key]locked, effectiveBefore map[key]ledger.Volumes, updates []ledger.VolumeUpdate) int {
 	running := copyLocked(before)
 	effective := copyVolumes(effectiveBefore)
 
-	batch := &pgx.Batch{}
 	queue := func(address ledger.Address, asset ledger.Asset, amount *big.Int, isSource bool) {
 		k := key{address, asset}
 		apply(running, k, amount, isSource)
@@ -64,18 +61,7 @@ func (s *Store) insertMoves(ctx context.Context, tx pgx.Tx, t *ledger.Transactio
 		queue(p.Destination, p.Asset, p.Amount, false)
 	}
 
-	results := tx.SendBatch(ctx, batch)
-	for range len(t.Postings) * 2 {
-		if _, err := results.Exec(); err != nil {
-			_ = results.Close()
-			return fmt.Errorf("insert moves: %w", err)
-		}
-	}
-	if err := results.Close(); err != nil {
-		return err
-	}
-
-	return s.shiftLaterEffectiveVolumes(ctx, tx, updates, t.Timestamp)
+	return s.queueLaterEffectiveShift(batch, updates, t.Timestamp) + len(t.Postings)*2
 }
 
 // the effective volumes of each touched account as of a date.
@@ -142,8 +128,7 @@ func (s *Store) effectiveVolumesAt(ctx context.Context, tx pgx.Tx, updates []led
 //
 // when nothing is backdated this matches no rows and costs one statement per
 // touched pair.
-func (s *Store) shiftLaterEffectiveVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.VolumeUpdate, at time.Time) error {
-	batch := &pgx.Batch{}
+func (s *Store) queueLaterEffectiveShift(batch *pgx.Batch, updates []ledger.VolumeUpdate, at time.Time) int {
 	for _, u := range updates {
 		batch.Queue(`
 			update moves
@@ -152,15 +137,7 @@ func (s *Store) shiftLaterEffectiveVolumes(ctx context.Context, tx pgx.Tx, updat
 			   and effective_date > $4`,
 			s.ledger, u.Account, u.Asset, at, numeric(u.Input), numeric(u.Output))
 	}
-
-	results := tx.SendBatch(ctx, batch)
-	for range updates {
-		if _, err := results.Exec(); err != nil {
-			_ = results.Close()
-			return fmt.Errorf("shift effective volumes: %w", err)
-		}
-	}
-	return results.Close()
+	return len(updates)
 }
 
 // the same copy, dropping the permission: the running accumulation is about

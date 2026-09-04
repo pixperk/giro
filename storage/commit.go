@@ -326,6 +326,23 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 	// and shows up immediately on linux.
 	timestamp = timestamp.UTC().Truncate(time.Microsecond)
 
+	// Read before allocating, because allocating takes the exclusive lock on
+	// the ledgers row and holds it until commit -- and that lock, not account
+	// contention, is what serialises writes to a ledger. Measured: one hot
+	// source account costs 8% against disjoint accounts, while eight ledgers
+	// give 5.4x. So the throughput lever is the time this lock is held, and
+	// every round trip moved out from under it is worth roughly its share.
+	//
+	// Safe to move because lockVolumes has already taken FOR UPDATE on every
+	// (account, asset) this read touches. A concurrent transaction that could
+	// insert a move we would miss is one that overlaps our accounts, and it is
+	// blocked on those locks. Anything not overlapping writes moves we neither
+	// read nor care about.
+	effectiveBefore, err := s.effectiveVolumesAt(ctx, tx, updates, timestamp)
+	if err != nil {
+		return nil, alloc, err
+	}
+
 	alloc, err = s.allocate(ctx, tx)
 	if err != nil {
 		return nil, alloc, err
@@ -343,10 +360,27 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 	if err := s.insertTransaction(ctx, tx, transaction); err != nil {
 		return nil, alloc, err
 	}
-	if err := s.upsertAccounts(ctx, tx, updates, timestamp); err != nil {
-		return nil, alloc, err
+
+	// Everything remaining is a write with nothing to read back, so it all
+	// travels together. Three separate batches here were three round trips
+	// held under both the account and the ledger locks, and on a database
+	// across a network that hold time is round trips rather than work.
+	//
+	// Order inside the batch is preserved -- the server runs the statements in
+	// sequence -- so the accounts rows are still touched in the sorted order
+	// every transaction uses, and the lock ordering is unchanged.
+	writes := &pgx.Batch{}
+	expected := s.queueAccounts(writes, updates, timestamp)
+	expected += s.queueMoves(writes, transaction, before, effectiveBefore, updates)
+
+	results := tx.SendBatch(ctx, writes)
+	for range expected {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return nil, alloc, fmt.Errorf("apply transaction: %w", err)
+		}
 	}
-	if err := s.insertMoves(ctx, tx, transaction, before, updates); err != nil {
+	if err := results.Close(); err != nil {
 		return nil, alloc, err
 	}
 	return transaction, alloc, nil

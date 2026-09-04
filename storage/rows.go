@@ -84,7 +84,12 @@ func (s *Store) insertTransaction(ctx context.Context, tx pgx.Tx, t *ledger.Tran
 //
 // first_usage takes the earliest effective date ever seen, which a backdated
 // transaction can move earlier. insertion_date never moves.
-func (s *Store) upsertAccounts(ctx context.Context, tx pgx.Tx, updates []ledger.VolumeUpdate, timestamp time.Time) error {
+// queueAccounts adds the account upserts to batch and reports how many
+// results they will produce. It queues rather than sends so that everything
+// written after the transaction row travels in one round trip: this runs
+// while both the account and ledger locks are held, and on a database across
+// a network the hold time is round trips rather than work.
+func (s *Store) queueAccounts(batch *pgx.Batch, updates []ledger.VolumeUpdate, timestamp time.Time) int {
 	// distinct accounts, still in the sorted order the updates arrived in, so
 	// these row locks are taken in the same sequence by every transaction.
 	addresses := make([]string, 0, len(updates))
@@ -99,7 +104,6 @@ func (s *Store) upsertAccounts(ctx context.Context, tx pgx.Tx, updates []ledger.
 		segments[i] = ledger.Address(a).Segments()
 	}
 
-	batch := &pgx.Batch{}
 	for i, address := range addresses {
 		batch.Queue(`
 			insert into accounts (ledger, address, address_array, first_usage, insertion_date, updated_at)
@@ -109,15 +113,7 @@ func (s *Store) upsertAccounts(ctx context.Context, tx pgx.Tx, updates []ledger.
 			       updated_at  = now()`,
 			s.ledger, address, segments[i], timestamp)
 	}
-
-	results := tx.SendBatch(ctx, batch)
-	defer func() { _ = results.Close() }()
-	for range addresses {
-		if _, err := results.Exec(); err != nil {
-			return fmt.Errorf("upsert accounts: %w", err)
-		}
-	}
-	return results.Close()
+	return len(addresses)
 }
 
 // deduplicated and sorted, for the text[] columns the gin index answers
