@@ -85,6 +85,19 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # the same suite as the restricted application role, which is how it runs
+      # in production. every application path must still pass; the tests that
+      # skip are the ones that have to damage the book to prove the damage is
+      # noticed, and under this role they cannot stage their attack.
+      #
+      # without this the role split rots silently: the grants would stay in the
+      # migration and stop matching what the code needs, and nothing would say
+      # so until a deployment failed.
+      - name: test as the restricted role
+        env:
+          GIRO_TEST_ROLE: giro_app
+        run: go test -race -shuffle=on ./storage/
+
   migrations:
     runs-on: ubuntu-latest
 
