@@ -1,6 +1,6 @@
 # Reconciling giro
 
-*Complete type and function reference: [API.md](API.md).*
+*Reference: [API.md](API.md). Reasoning: [DECISIONS.md](../DECISIONS.md), D45–D50.*
 
 Every check inside a ledger proves the book is consistent with itself. None of
 them can tell you the money is actually in the bank.
@@ -178,45 +178,28 @@ hour every ten minutes is correct and cheap.
 
 ---
 
-## How matching works
+## The matching rules
 
-A line matches on an exact reference or it does not match at all. No fuzzy
+A line matches on an **exact reference** or it does not match at all. No fuzzy
 matching, no matching by amount and date, no guessing.
 
-> An unmatched line costs somebody five minutes.
-> A falsely matched one costs a restatement.
+Two rules, cheapest first:
 
-The cost is asymmetric, so everything is deterministic and anything ambiguous is
-left alone rather than resolved on a balance of probabilities.
+- **One line, one movement.** Same reference, same asset, right direction.
+- **One line, several movements.** A consolidated wire — matched only when the
+  amounts sum to the line **exactly**. A set that does not add up stays
+  unmatched.
 
-### Two rules, cheapest first
+**Supply `Direction`.** Without it an outbound wire can reconcile against an
+inbound movement of the same size and reference: same number, same reference,
+opposite direction, and a clean-looking match that is completely wrong.
 
-**One line, one movement.** Same reference, same asset, right direction.
+Lines are matched against **movements**, not transactions — a statement line is
+one account, one asset, one amount, one direction, and a transaction can be two
+of those at once.
 
-**One line, several movements.** A consolidated wire pays many transactions
-under one reference — matched *only* when the amounts sum to the line exactly.
-
-That exactness is the whole discriminator. Several movements under one reference
-is either a real batch or an ambiguous reference, and nothing in the reference
-itself tells them apart: a real batch adds up to the line it paid, and two
-unrelated movements that happen to share a string do not.
-
-### Direction is checked
-
-Without it, an outbound wire reconciles against an inbound movement of the same
-size and reference. Same number, same ref, opposite direction, and a
-clean-looking match that is completely wrong. Supplying `Direction` makes it
-impossible.
-
-A source that doesn't say which way the money went skips the check. That is the
-source being unhelpful rather than wrong.
-
-### It matches movements, not transactions
-
-A statement line is one account, one asset, one amount, one direction — which is
-what a movement is. A transaction can be two of those at once: selling
-stablecoin for dollars moves 100,000 of one thing and 99,960 of another, and a
-line on the exchange's dollar statement is talking about exactly one of them.
+The reasoning behind each of these, and what was rejected, is in
+[DECISIONS.md](../DECISIONS.md) (D45–D50).
 
 ---
 
@@ -365,25 +348,22 @@ nothing wrong, which is why every check reports what it examined.
 
 ---
 
-## The report cannot be cleaned up
+## The report cannot be faked
 
-The most dangerous thing about reconciliation is that a clean report is easy to
-fake, and faking it moves no money.
+A clean report is easy to fake and faking it moves no money: delete the records
+that did not reconcile and every other check in the system stays green.
 
-Delete the records that did not reconcile and the postings are untouched, the
-hash chain still verifies, conservation still holds — and the book now
-reconciles. Nothing else in the system would notice.
-
-So the database refuses it, not the application:
+So the database refuses it, not the application.
 
 - **Match evidence is append-only.** No updates, no deletes, no truncate.
-- **A staged line may be marked matched and nothing else.** You cannot revise an
-  amount or a reference to make something pair.
-- **A line naming an unregistered asset is refused at ingest**, rather than
-  sitting in the unmatched queue where a configuration error looks like a break.
+- **A staged line may be marked matched and nothing else.** An amount or a
+  reference cannot be revised to make something pair.
+- **A line naming an unregistered asset or source is refused at ingest**, rather
+  than sitting in the unmatched queue where a configuration error looks like a
+  break.
 
-These hold against raw SQL, and against the role the application connects as,
-which has no privilege to alter a table.
+These hold against raw SQL and against the role the application connects as.
+See D49.
 
 ---
 
