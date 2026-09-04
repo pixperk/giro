@@ -245,3 +245,88 @@ func TestRawSQLCannotCreditABoundedAccount(t *testing.T) {
 		       output = output + case when address = 'users:alice' then 500 else 0 end
 		 where ledger = 'main' and address in ('cost:peg', 'users:alice')`)
 }
+
+// Reconciliation evidence is append only, and this is the guard that matters
+// most in that layer. Deleting a match moves no money: the postings are
+// untouched, the chain still verifies, conservation still holds, and the book
+// now reconciles because the rows that did not reconcile are gone. A clean
+// report obtained by deleting the mess is the failure reconciliation exists to
+// prevent.
+func TestReconciliationEvidenceIsAppendOnly(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 10_000)
+	stageOneRecord(t, ctx, pool)
+
+	if _, err := pool.Exec(ctx, `
+		insert into recon_matches (ledger, source, record_id, transaction_id, variance, rule)
+		values ('main', 'kraken', 'L1', 1, 0, 'exact_ref')`); err != nil {
+		t.Fatal(err)
+	}
+
+	refused(t, ctx, pool, "append only",
+		"delete from recon_matches where ledger = 'main'")
+	refused(t, ctx, pool, "append only",
+		"update recon_matches set variance = 0 where ledger = 'main'")
+	refused(t, ctx, pool, "append only", "truncate recon_matches cascade")
+}
+
+// A staged line may be marked matched and nothing else. Revising the amount or
+// the reference of a line that did not match is how an unreconciled book is
+// made to look reconciled.
+func TestAStagedRecordCannotBeRevised(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 10_000)
+	stageOneRecord(t, ctx, pool)
+
+	// what matching does, which must keep working
+	if _, err := pool.Exec(ctx, `
+		update recon_records set matched_count = 1, matched_at = now()
+		 where ledger = 'main' and source = 'kraken' and record_id = 'L1'`); err != nil {
+		t.Fatalf("marking a record matched was refused: %v", err)
+	}
+
+	// what the source said, which cannot move
+	refused(t, ctx, pool, "may only change",
+		"update recon_records set amount = 1 where ledger = 'main'")
+	refused(t, ctx, pool, "may only change",
+		"update recon_records set reference = 'other' where ledger = 'main'")
+	refused(t, ctx, pool, "may only change",
+		"update recon_records set direction = 'out' where ledger = 'main'")
+	refused(t, ctx, pool, "never deleted",
+		"delete from recon_records where ledger = 'main'")
+	refused(t, ctx, pool, "append only", "truncate recon_records cascade")
+}
+
+// A line naming an asset the ledger does not handle is refused at ingest
+// rather than sitting unmatched for ever. It is a source misconfiguration, and
+// an unmatched queue is the wrong place to discover one.
+func TestAStagedRecordMustNameARegisteredAsset(t *testing.T) {
+	ctx, _, pool := testStore(t)
+	if _, err := pool.Exec(ctx,
+		"insert into recon_sources (ledger, id, name) values ('main','kraken','Kraken')"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := pool.Exec(ctx, `
+		insert into recon_records (ledger, source, record_id, reference, asset, amount, direction)
+		values ('main','kraken','L9','W-9','GBP/2',100,'in')`)
+	if err == nil {
+		t.Fatal("a line in an unregistered asset was staged")
+	}
+	if !strings.Contains(err.Error(), "asset") {
+		t.Errorf("err = %v, want the asset foreign key", err)
+	}
+}
+
+func stageOneRecord(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx,
+		"insert into recon_sources (ledger, id, name) values ('main','kraken','Kraken')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into recon_records (ledger, source, record_id, reference, asset, amount, direction)
+		values ('main','kraken','L1','W-1','USD/2',10000,'in')`); err != nil {
+		t.Fatal(err)
+	}
+}
