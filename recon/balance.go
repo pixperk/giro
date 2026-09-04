@@ -32,8 +32,18 @@ import (
 // stronger check available when the source supports it.
 type BalanceSource interface {
 	Source
-	// Balance is what this counterparty says it holds for us, in the asset's
-	// minor units. Positive means they hold it; a payable is negative.
+	// Balance is this counterparty's own figure for the net position across
+	// the edge we share, in the asset's minor units.
+	//
+	// Positive means value has moved to us on balance: the chain says it sent
+	// us a hundred thousand, the exchange says it has paid us more than we
+	// have paid it. Negative means the reverse.
+	//
+	// The sign convention is the one thing an adapter has to get right here,
+	// and it is stated from our side rather than theirs because "what they
+	// hold for us" means something different for a chain, an exchange and a
+	// bank, while "what has come to us across this edge" means one thing for
+	// all three.
 	Balance(ctx context.Context, asset ledger.Asset) (*big.Int, error)
 }
 
@@ -43,14 +53,17 @@ type BalanceComparison struct {
 	Account ledger.Address
 	Asset   ledger.Asset
 
-	// Ours is the boundary account's balance, negated.
+	// Ours is what has come to us across this edge, on balance: the boundary
+	// account's balance, negated.
 	//
 	// A boundary account is the outside world's side of the book, so it holds
-	// the mirror of our position: money we received from a counterparty leaves
-	// their account here and its balance goes negative by what we hold. Negating
-	// it puts both sides of this comparison in the same terms, which is the
-	// only way the difference means anything.
-	Ours   *big.Int
+	// the mirror of our position. Money arriving leaves that account, and its
+	// balance goes negative by what we now hold. Negating puts both sides of
+	// this comparison in the same terms, which is the only way the difference
+	// means anything.
+	Ours *big.Int
+
+	// Theirs is the same quantity, as the counterparty reports it.
 	Theirs *big.Int
 	// Difference is Theirs minus Ours. Zero is agreement.
 	Difference *big.Int
@@ -59,7 +72,7 @@ type BalanceComparison struct {
 func (c BalanceComparison) Agrees() bool { return c.Difference.Sign() == 0 }
 
 func (c BalanceComparison) Error() string {
-	return fmt.Sprintf("%s says it holds %s %s for us and we say %s: out by %s",
+	return fmt.Sprintf("%s says %s %s has come to us across this edge and we say %s: out by %s",
 		c.Source, c.Theirs, c.Asset, c.Ours, c.Difference)
 }
 

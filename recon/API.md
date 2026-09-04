@@ -46,8 +46,14 @@ type BalanceSource interface {
 }
 ```
 
-`Balance` returns what the counterparty says it holds **for you**, in the
-asset's minor units. Positive means they hold it; a payable is negative.
+`Balance` is the counterparty's own figure for **the net position across the
+edge you share**, in minor units. Positive means value has moved to you on
+balance: the chain says it sent you a hundred thousand, the exchange says it has
+paid you more than you have paid it.
+
+The sign convention is the one thing an adapter has to get right here, and it is
+stated from your side because "what they hold for us" means something different
+for a chain, an exchange and a bank.
 
 Separate from `Source` because a chain can answer this and a statement file
 cannot, and a source that cannot answer should not have to pretend.
@@ -181,10 +187,13 @@ func (c BalanceComparison) Agrees() bool
 func (c BalanceComparison) Error() string
 ```
 
-`Ours` is **the boundary account's balance, negated**. A boundary account holds
-the outside world's side of the book, so it carries the mirror of your position.
-Negating puts both sides in the same terms, which is the only way the difference
-means anything.
+`Ours` is what has come to you across this edge on balance — **the boundary
+account's balance, negated**. A boundary account holds the outside world's side
+of the book, so it carries the mirror of your position. Negating puts both sides
+in the same terms, which is the only way the difference means anything.
+
+`Theirs` is the same quantity as the counterparty reports it, so a negative
+`Difference` means they say less came across than you recorded.
 
 ### `StaleBreak`
 

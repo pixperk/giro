@@ -242,3 +242,26 @@ func TestBoundaryIsConfigurable(t *testing.T) {
 		t.Errorf("default prefix = %q", recon.DefaultBoundaryPrefix)
 	}
 }
+
+// no asset may create or destroy value, ever. asserted here as well as in the
+// engine's own suite, because a reconciliation test that quietly broke the
+// book while proving a match would be reporting on a fiction.
+func assertConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		select asset, (sum(input) - sum(output))::text
+		  from accounts_volumes where ledger = 'main' group by asset`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var asset, drift string
+		if err := rows.Scan(&asset, &drift); err != nil {
+			t.Fatal(err)
+		}
+		if drift != "0" {
+			t.Errorf("asset %s drifted by %s", asset, drift)
+		}
+	}
+}

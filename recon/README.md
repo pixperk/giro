@@ -271,13 +271,22 @@ type BalanceSource interface {
 got, err := recon.CompareBalance(ctx, db, "main", kraken, "external:lp:kraken:USD", "USD/2")
 if !got.Agrees() {
 	log.Print(got.Error())
-	// kraken says it holds 99000000000 USDT/6 for us and we say 100000000000: out by -1000000000
+	// kraken says 99000000000 USDT/6 has come to us across this edge
+	// and we say 100000000000: out by -1000000000
 }
 ```
 
-Optional and separate from `Source` on purpose: a chain can tell you what an
-address holds and a statement file cannot, and a source that can't answer
-shouldn't have to pretend.
+`Balance` is the counterparty's own figure for **the net position across the
+edge you share**. Positive means value has moved to you on balance, and a
+negative `Difference` means they say less came across than you recorded.
+
+That sign convention is stated from your side rather than theirs on purpose:
+"what they hold for us" means something different for a chain, an exchange and a
+bank, while "what has come to us across this edge" means one thing for all
+three. It is the one thing an adapter has to get right here.
+
+Optional and separate from `Source`: a chain can answer this and a statement
+file cannot, and a source that can't should not have to pretend.
 
 giro is unusually well placed for this. A boundary account per counterparty and
 asset means **your side of the comparison is already an account balance** rather
