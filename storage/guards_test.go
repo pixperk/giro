@@ -228,3 +228,20 @@ func TestRevokingPermissionOnANegativeAccountIsAllowed(t *testing.T) {
 		t.Error("the detector did not report a negative unpermitted account")
 	}
 }
+
+// The upper bound holds against raw SQL too, like every other guard.
+func TestRawSQLCannotCreditABoundedAccount(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	if err := s.SetAllowPositive(ctx, "cost:peg", "USD/2", false); err != nil {
+		t.Fatal(err)
+	}
+	fund(t, ctx, s, "users:alice", 10_000)
+
+	// conservation preserving, so this isolates the bound rather than tripping
+	// the conservation check
+	refused(t, ctx, pool, "not permitted a positive balance", `
+		update accounts_volumes
+		   set input  = input  + case when address = 'cost:peg'    then 500 else 0 end,
+		       output = output + case when address = 'users:alice' then 500 else 0 end
+		 where ledger = 'main' and address in ('cost:peg', 'users:alice')`)
+}

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/pixperk/giro/ledger"
@@ -345,4 +346,103 @@ func TestSetAllowNegativeValidatesItsArguments(t *testing.T) {
 		}
 	}
 	_ = ctx
+}
+
+// The mirror of the overdraw guard, and the case it exists for.
+//
+// A cost account is a tally of what something has cost. Every loss pushes it
+// further negative and nothing pushes it back, so a positive balance there is
+// a loss that was recorded as a gain. Conservation has no opinion about which
+// direction is which, so the book balances and the profit figure is wrong by
+// twice the amount.
+func TestACostAccountCannotBeCredited(t *testing.T) {
+	ctx, s, pool := testStore(t)
+
+	// a cost line: negative by design, and only ever that way
+	if err := s.SetAllowNegative(ctx, "cost:peg_absorption", "USD/2", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAllowPositive(ctx, "cost:peg_absorption", "USD/2", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// absorbing a loss is what it is for
+	if _, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "cost:peg_absorption", Destination: "ops:usd", Asset: "USD/2", Amount: n(4_000)},
+	}, CommitOptions{Reference: "peg-loss"}); err != nil {
+		t.Fatalf("absorbing a loss was refused: %v", err)
+	}
+
+	// a gain of the same size brings it back to zero, which is fine: the peg
+	// swings both ways and the account is a net figure
+	if _, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "ops:usd", Destination: "cost:peg_absorption", Asset: "USD/2", Amount: n(4_000)},
+	}, CommitOptions{Reference: "peg-gain"}); err != nil {
+		t.Fatalf("returning to zero was refused: %v", err)
+	}
+
+	// one more and it is a cost account in credit, which is the mistake
+	_, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "ops:usd", Destination: "cost:peg_absorption", Asset: "USD/2", Amount: n(1)},
+	}, CommitOptions{Reference: "backwards"})
+
+	var credited *UnexpectedCreditError
+	if !errors.As(err, &credited) {
+		t.Fatalf("err = %v, want UnexpectedCreditError", err)
+	}
+	if credited.Account != "cost:peg_absorption" || credited.Balance.Int64() != 1 {
+		t.Errorf("reported %s holding %s", credited.Account, credited.Balance)
+	}
+	assertConserved(t, ctx, pool)
+}
+
+// An ordinary account is bounded below and unbounded above, and always was.
+// Nothing changes for anything that existed before the bound did.
+func TestAnOrdinaryAccountIsStillUnboundedAbove(t *testing.T) {
+	ctx, s, pool := testStore(t)
+	fund(t, ctx, s, "users:alice", 1_000_000)
+
+	if got := balance(t, ctx, pool, "users:alice", "USD/2"); got.Int64() != 1_000_000 {
+		t.Errorf("alice = %s: a default account was bounded above", got)
+	}
+}
+
+// world stands for everything outside the ledger and is bounded in neither
+// direction.
+func TestWorldCannotBeBoundedAbove(t *testing.T) {
+	ctx, s, _ := testStore(t)
+	if err := s.SetAllowPositive(ctx, ledger.WorldAccount, "USD/2", false); err == nil {
+		t.Error("world was bounded above")
+	}
+}
+
+// The detector has two sides for the same reason the guard does. Narrowing a
+// bound on an account already outside it is allowed -- an operator stopping
+// the bleeding should not be blocked by the bleeding -- so the state is
+// reachable and something has to look for it.
+func TestTheDetectorFindsBothSides(t *testing.T) {
+	ctx, s, _ := testStore(t)
+
+	// an account left positive, then bounded above
+	if _, err := s.CommitTransaction(ctx, ledger.Postings{
+		{Source: "world", Destination: "cost:mistake", Asset: "USD/2", Amount: n(500)},
+	}, CommitOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAllowPositive(ctx, "cost:mistake", "USD/2", false); err != nil {
+		t.Fatal(err)
+	}
+
+	var unpermitted *UnpermittedNegative
+	_, err := s.VerifyBalancePermissions(ctx)
+	if !errors.As(err, &unpermitted) {
+		t.Fatalf("err = %v, want the positive balance reported", err)
+	}
+	if unpermitted.Account != "cost:mistake" {
+		t.Errorf("reported %s, want cost:mistake", unpermitted.Account)
+	}
+	// and the message says which way it is wrong
+	if !strings.Contains(err.Error(), "positive") {
+		t.Errorf("err = %v, want it to name the direction", err)
+	}
 }

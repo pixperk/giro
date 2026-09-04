@@ -35,7 +35,7 @@ import (
 var ErrWorldMustAllowNegative = errors.New("world must be allowed a negative balance")
 
 // SetAllowNegative permits or refuses a negative balance for one account in
-// one asset.
+// one asset. See SetAllowPositive for the mirror.
 //
 // per asset rather than per account, because an account can be a cost line in
 // one and an ordinary balance in another. an operating account that absorbs
@@ -67,8 +67,40 @@ func (s *Store) SetAllowNegative(ctx context.Context, address ledger.Address, as
 	return nil
 }
 
-// UnpermittedNegative names one account and asset holding a negative balance
-// it is not permitted to hold.
+// SetAllowPositive permits or refuses a positive balance.
+//
+// The default is true, because an ordinary account is bounded below and
+// unbounded above and always was. Setting it false is for an account that only
+// ever leans one way: a cost line is a tally of what something has cost, every
+// loss pushes it further negative, and nothing ever pushes it back. A positive
+// balance there means a loss was recorded as a gain, which leaves the book
+// balanced and the profit figure wrong by twice the amount.
+func (s *Store) SetAllowPositive(ctx context.Context, address ledger.Address, asset ledger.Asset, allow bool) error {
+	if !address.Valid() {
+		return fmt.Errorf("invalid account address %q", address)
+	}
+	if !asset.Valid() {
+		return fmt.Errorf("invalid asset %q", asset)
+	}
+	if address == ledger.WorldAccount && !allow {
+		return fmt.Errorf("%w: world stands for everything outside the ledger and is "+
+			"bounded in neither direction", ErrWorldMustAllowNegative)
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		insert into accounts_volumes (ledger, address, asset, allow_positive)
+		values ($1, $2, $3, $4)
+		on conflict (ledger, address, asset)
+		do update set allow_positive = excluded.allow_positive`,
+		s.ledger, address, asset, allow)
+	if err != nil {
+		return fmt.Errorf("set allow_positive for %s/%s: %w", address, asset, err)
+	}
+	return nil
+}
+
+// UnpermittedNegative names one account and asset holding a balance outside a
+// bound it is not permitted to cross.
 type UnpermittedNegative struct {
 	Account ledger.Address
 	Asset   ledger.Asset
@@ -76,8 +108,12 @@ type UnpermittedNegative struct {
 }
 
 func (e *UnpermittedNegative) Error() string {
-	return fmt.Sprintf("%s %s: balance %s, and the account is not permitted to go negative",
-		e.Account, e.Asset, e.Balance)
+	side := "negative"
+	if e.Balance.Sign() > 0 {
+		side = "positive"
+	}
+	return fmt.Sprintf("%s %s: balance %s, and the account is not permitted to go %s",
+		e.Account, e.Asset, e.Balance, side)
 }
 
 // VerifyBalancePermissions finds accounts sitting below zero without the
@@ -104,7 +140,9 @@ func (s *Store) VerifyBalancePermissions(ctx context.Context) (checked int, err 
 	rows, err := s.pool.Query(ctx, `
 		select address, asset, (input - output)::text
 		  from accounts_volumes
-		 where ledger = $1 and not allow_negative and input < output
+		 where ledger = $1
+		   and ((not allow_negative and input < output)
+		     or (not allow_positive and input > output))
 		 order by address, asset`,
 		s.ledger)
 	if err != nil {

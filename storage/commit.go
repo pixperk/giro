@@ -232,8 +232,8 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 	return transaction, alloc, nil
 }
 
-// checkBalances rejects the transaction if any account not permitted to go
-// negative would end below zero.
+// checkBalances rejects the transaction if any account would end outside a
+// bound it is not permitted to cross.
 //
 // the permission is read from the row the caller already locked, so it cannot
 // have changed since. world carries it from creation; anything else carries it
@@ -246,13 +246,10 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 func checkBalances(before map[key]locked, updates []ledger.VolumeUpdate) error {
 	for _, u := range updates {
 		v := before[key{u.Account, u.Asset}]
-		if v.allowNegative {
-			continue
-		}
 		input := new(big.Int).Add(v.Input, u.Input)
 		output := new(big.Int).Add(v.Output, u.Output)
 
-		if input.Cmp(output) < 0 {
+		if !v.allowNegative && input.Cmp(output) < 0 {
 			return &InsufficientFundsError{
 				Account:   u.Account,
 				Asset:     u.Asset,
@@ -260,8 +257,33 @@ func checkBalances(before map[key]locked, updates []ledger.VolumeUpdate) error {
 				Requested: u.Output,
 			}
 		}
+
+		// the mirror. a cost account only ever leans one way, so a positive
+		// balance on one means a loss was recorded as a gain: the books still
+		// balance and the profit figure is wrong by twice the amount.
+		if !v.allowPositive && input.Cmp(output) > 0 {
+			return &UnexpectedCreditError{
+				Account: u.Account,
+				Asset:   u.Asset,
+				Balance: new(big.Int).Sub(input, output),
+			}
+		}
 	}
 	return nil
+}
+
+// UnexpectedCreditError is returned when a posting would leave an account
+// above zero that is not permitted to be.
+type UnexpectedCreditError struct {
+	Account ledger.Address
+	Asset   ledger.Asset
+	Balance *big.Int
+}
+
+func (e *UnexpectedCreditError) Error() string {
+	return fmt.Sprintf("%s would hold %s %s, and is not permitted a positive balance: "+
+		"a cost recorded as a gain leaves the book balanced and the profit wrong",
+		e.Account, e.Balance, e.Asset)
 }
 
 // the final state of every touched account, frozen at commit.

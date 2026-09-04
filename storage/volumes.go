@@ -28,6 +28,7 @@ type key struct {
 type locked struct {
 	ledger.Volumes
 	allowNegative bool
+	allowPositive bool
 	// the account is closed, so it accepts nothing in either direction. a fact
 	// about the address rather than the (address, asset) row, read here so the
 	// commit path does not need a second query or a second lock for it.
@@ -93,7 +94,7 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 	}
 
 	rows, err := tx.Query(ctx, `
-		select address, asset, input, output, allow_negative
+		select address, asset, input, output, allow_negative, allow_positive
 		from accounts_volumes
 		where ledger = $1
 		  and (address, asset) in (select * from unnest($2::text[], $3::text[]))
@@ -109,8 +110,8 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 	for rows.Next() {
 		var k key
 		var in, out pgtype.Numeric
-		var allowNegative bool
-		if err := rows.Scan(&k.account, &k.asset, &in, &out, &allowNegative); err != nil {
+		var allowNegative, allowPositive bool
+		if err := rows.Scan(&k.account, &k.asset, &in, &out, &allowNegative, &allowPositive); err != nil {
 			return nil, err
 		}
 		input, err := bigInt(in)
@@ -124,6 +125,7 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 		current[k] = locked{
 			Volumes:       ledger.Volumes{Input: input, Output: output},
 			allowNegative: allowNegative,
+			allowPositive: allowPositive,
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -140,6 +142,7 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 			current[k] = locked{
 				Volumes:       ledger.NewVolumes(),
 				allowNegative: u.Account == ledger.WorldAccount,
+				allowPositive: true,
 			}
 		}
 	}

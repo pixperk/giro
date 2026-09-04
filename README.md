@@ -1169,7 +1169,38 @@ The guard on `accounts` names the columns that may change, so this column had
 to be declared there before it could be written. That is the allow list working
 as intended: a new column arrives protected rather than unprotected.
 
-### D43. Going below zero is a permission on a row, not a name
+### D43. The balance bound has two sides
+
+`allow_negative` could turn the guard off and never turn it around, and some
+accounts need it the other way.
+
+A cost account is a tally of what something has cost. Every loss pushes
+`cost:peg_absorption` further negative and nothing pushes it back, so a
+positive balance there means a loss was recorded as a gain. **Conservation has
+no opinion about which direction is which**, so the book balances, both sides
+of the posting are real, and the profit figure is wrong by twice the amount.
+
+Such an account was set `allow_negative`, which means "no rule at all", so
+nothing noticed. `allow_positive` is the mirror, and the three states cover
+what accounts actually are:
+
+| | Bounded below | Bounded above |
+|---|---|---|
+| `users:alice` | yes | no |
+| `world`, `external:*` | no | no |
+| `cost:peg_absorption` | no | yes |
+
+Default true, so nothing changes for anything that existed before it: an
+ordinary account is bounded below and unbounded above, which is what it always
+was.
+
+Both bounds share the carve out from D37. An operator narrowing a bound on an
+account already outside it is stopping the bleeding, and refusing that would
+leave the only remedy blocked by the thing it remedies. So the state stays
+reachable and `VerifyBalancePermissions` reports it, now from either side and
+naming which.
+
+### D44. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be
