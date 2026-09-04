@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/pixperk/giro/fx"
 	"github.com/pixperk/giro/storage"
 )
 
@@ -65,10 +66,20 @@ func verifyCommand(ctx context.Context, args []string) error {
 
 	var findings int
 	for _, name := range names {
+		// the composition root, and the only place the layers meet. the engine
+		// has no idea two postings are a trade, so a check that they match a
+		// stated rate cannot live inside it without teaching it. here it is
+		// just another check with a name.
 		results, err := storage.New(pool, name).Verify(ctx, storage.VerifyOptions{
 			StalePrefix: *stalePrefix,
 			StaleAfter:  *staleAfter,
 			Record:      *record,
+			Extra: []storage.NamedCheck{{
+				Name: "conversions",
+				Run: func(ctx context.Context) (int, error) {
+					return fx.Verify(ctx, pool, name, fx.DefaultTolerance)
+				},
+			}},
 		})
 		// print what did run before returning, so a failure to record does not
 		// swallow the findings that were the point of running

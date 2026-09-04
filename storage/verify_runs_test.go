@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,6 +19,9 @@ func TestVerifyRunsEveryCheckOnAHealthyLedger(t *testing.T) {
 	}
 
 	want := []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions"}
+	// exactly the engine's own checks. anything a layer above contributes
+	// arrives through Extra rather than being built in, which is what keeps
+	// the engine from having to know what those checks mean.
 	if len(results) != len(want) {
 		t.Fatalf("%d checks, want %d", len(results), len(want))
 	}
@@ -218,5 +223,47 @@ func TestLedgersListsAllOfThem(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "main" || names[1] != "theirs" {
 		t.Errorf("names = %v, want [main theirs] in order", names)
+	}
+}
+
+// A check belonging to a layer above the engine runs alongside the engine's
+// own and is recorded the same way, because an operator wants one answer to
+// "is the book sound" rather than one per package.
+func TestContributedChecksRunAndAreRecorded(t *testing.T) {
+	ctx, s, _ := testStore(t)
+	fund(t, ctx, s, "users:alice", 10000)
+
+	results, err := s.Verify(ctx, VerifyOptions{
+		Record: true,
+		Extra: []NamedCheck{
+			{Name: "contributed_ok", Run: func(context.Context) (int, error) { return 7, nil }},
+			{Name: "contributed_finding", Run: func(context.Context) (int, error) {
+				return 3, errors.New("something a layer above found")
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]CheckResult{}
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+	if got := byName["contributed_ok"]; !got.OK || got.Checked != 7 {
+		t.Errorf("contributed_ok = %+v, want ok with 7 checked", got)
+	}
+	if got := byName["contributed_finding"]; got.OK || got.Detail == "" {
+		t.Errorf("contributed_finding = %+v, want a finding with detail", got)
+	}
+
+	seen, err := s.LastVerified(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"contributed_ok", "contributed_finding"} {
+		if _, ok := seen[name]; !ok {
+			t.Errorf("%s was not recorded alongside the engine's own checks", name)
+		}
 	}
 }

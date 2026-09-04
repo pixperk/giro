@@ -994,7 +994,66 @@ inherited it. The restricted role therefore comes from **membership at login**
 (D36), which is a property of the authenticated role rather than session state,
 and survives multiplexing because there is nothing to survive.
 
-### D39. Going below zero is a permission on a row, not a name
+### D39. A conversion derives its amounts from its rate, in a package of its own
+
+**Where it lives is the decision.** The first version of this put `Conversion`
+in the `ledger` package, next to postings and volumes, which contradicted D1 in
+as many words: the ledger has no idea the two sides of a trade are related and
+no opinion on whether a price was fair. A type whose whole job is knowing they
+are related does not belong in the core of a general ledger.
+
+So `fx` is its own package. It imports `ledger`, and nothing imports it except
+the command that composes the layers. The engine keeps its position, metadata
+stays opaque to the engine, and a consumer that does no trading never sees it.
+That the arrangement holds is checked by the compiler rather than by review: if
+`ledger` or `storage` imported `fx`, the test package would be an import cycle
+and would not build.
+
+A conversion is two postings in one transaction, one asset out and another in.
+Conservation is checked per asset, so each side balances on its own and nothing
+compares them. The rate lived in metadata as free text nothing read, which left
+the number the margin depends on as the number nothing checked.
+
+`ledger.Conversion` takes the rate and the amount sold, and **computes** what
+arrives. Two numbers that must agree become one number that cannot disagree.
+
+```go
+sale := ledger.Conversion{
+    From: "USDT/6", Seller: "treasury:usdt", SoldTo: "external:lp:kraken:USDT",
+    To:   "USD/2",  BoughtFrom: "external:lp:kraken:USD", Buyer: "ops:usd",
+    Amount: usdt(100_000), Rate: "0.99960",
+}
+postings, _ := sale.Postings()          // 100,000.000000 USDT out, 99,960.00 USD in
+metadata := sale.Metadata(nil)          // the rate, recorded for checking later
+```
+
+**The scales are half the arithmetic.** An amount is in minor units, so
+`out = in × rate × 10^(toScale − fromScale)`. The factor of 10⁻⁴ between USDT/6
+and USD/2 does as much work as the rate does.
+
+**Exact rationals, never floats.** A rate is a decimal quantity and binary
+floating point cannot hold most decimals. Fractions truncate rather than round
+up, so a conversion can never manufacture a unit that was not there; what is
+left over is dust, and dust belongs in an account rather than in the difference
+between two numbers.
+
+`fx.Verify` recomputes every transaction that states a rate. `giro verify` runs
+it alongside the engine's own checks, contributed at the composition root
+rather than built in, so it appears as a sixth line without the engine
+learning what a trade is.
+
+Like `VerifyProjection` it catches something no other check would: restate the
+rate without touching the money and both sides still conserve, the chain is
+still intact, the projection still agrees.
+
+**What it does not do**, and this is the part worth being plain about. It has
+no opinion on whether 0.99960 was a *fair* price. That is a pricing question,
+it belongs upstream (D1), and the ledger has no way to know. So a rate that is
+simply wrong, recorded consistently in both the rate and the amounts, passes
+every check here while the trade is nine thousand dollars light. Only comparing
+against the venue's own statement finds that, which is reconciliation.
+
+### D40. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

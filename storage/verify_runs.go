@@ -46,6 +46,22 @@ type VerifyOptions struct {
 	// record the outcome. off by default so a caller can check without
 	// writing, which a read replica has to be able to do.
 	Record bool
+
+	// checks belonging to a layer above the engine, which the engine cannot
+	// run itself without learning what they mean. fx.Verify is the one that
+	// exists: the ledger has no idea two postings are a trade, so a check that
+	// they match a stated rate cannot live here.
+	//
+	// the command that composes the layers supplies them. they are recorded
+	// alongside the rest, because an operator wants one answer to "is the book
+	// sound" rather than one per package.
+	Extra []NamedCheck
+}
+
+// NamedCheck is a check contributed by a layer above the engine.
+type NamedCheck struct {
+	Name string
+	Run  func(context.Context) (int, error)
 }
 
 // Verify runs every check and reports each outcome, in a fixed order so two
@@ -74,6 +90,12 @@ func (s *Store) Verify(ctx context.Context, opts VerifyOptions) ([]CheckResult, 
 		start := time.Now()
 		checked, err := c.run(ctx)
 		results = append(results, result(c.name, checked, err, time.Since(start)))
+	}
+
+	for _, c := range opts.Extra {
+		start := time.Now()
+		checked, err := c.Run(ctx)
+		results = append(results, result(c.Name, checked, err, time.Since(start)))
 	}
 
 	if opts.StaleAfter > 0 {

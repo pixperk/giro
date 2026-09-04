@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/pixperk/giro/fx"
 	"github.com/pixperk/giro/ledger"
 )
 
@@ -96,13 +97,22 @@ func TestOffRampEndToEnd(t *testing.T) {
 	//    separable. conservation holds per asset, so this is not a "swap"
 	//    the ledger understands: it is two movements that commit together.
 	//
-	//    the rate lives in metadata. the ledger has no opinion on whether
-	//    0.99960 was a fair price, which is correct, and it also means
-	//    nothing here checks the arithmetic. that is step 8.
-	commit(t, ctx, s, "acme-sale", ledger.Postings{
-		{Source: treasury, Destination: krakenUSDT, Asset: "USDT/6", Amount: usdt(notional)},
-		{Source: krakenUSD, Destination: ops, Asset: "USD/2", Amount: n(fromKraken)},
-	}, "rate", "0.99960", "venue", "kraken")
+	//    the dollars are derived from the rate rather than typed beside it, so
+	//    the two cannot disagree. the ledger still has no opinion on whether
+	//    0.99960 was a fair price, which is a pricing question; it only knows
+	//    the amounts match the rate the transaction states.
+	sale := fx.Conversion{
+		Seller: treasury, SoldTo: krakenUSDT, BoughtFrom: krakenUSD, Buyer: ops,
+		From: "USDT/6", To: "USD/2", Amount: usdt(notional), Rate: "0.99960",
+	}
+	sold, err := sale.Postings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sold[1].Amount; got.Int64() != fromKraken {
+		t.Fatalf("the rate produces %s, want %d", got, fromKraken)
+	}
+	commitWith(t, ctx, s, "acme-sale", sold, sale.Metadata(ledger.Metadata{"venue": "kraken"}))
 
 	// 4. the fees, and the absorption that funds them. one transaction: the
 	//    operating account holds $235.00 and owes $275.00 in fees, so booking
@@ -332,4 +342,11 @@ func runOneDeal(t *testing.T, ctx context.Context, s *Store) {
 	commit(t, ctx, s, "acme-wire", ledger.Postings{
 		{Source: ops, Destination: bank, Asset: "USD/2", Amount: n(9_972_500)},
 	})
+}
+
+func commitWith(t *testing.T, ctx context.Context, s *Store, reference string, p ledger.Postings, m ledger.Metadata) {
+	t.Helper()
+	if _, err := s.CommitTransaction(ctx, p, CommitOptions{Reference: reference, Metadata: m}); err != nil {
+		t.Fatalf("%s: %v", reference, err)
+	}
 }
