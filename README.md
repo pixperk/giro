@@ -41,9 +41,10 @@ just migrate                  # apply the schema
 just db-app-role              # create the role the service connects as
 ```
 
-`.env` carries two connection strings on purpose. Migrations need the role that
-owns the tables; serving must not have it, because a table's owner can switch
-off the triggers that guard it.
+`DATABASE_URL` is what everything reads. Migrations need the role that owns the
+tables; serving must not have it, because a table's owner can switch off the
+triggers that guard it — so the migration step runs with that role in its own
+environment. See [The three roles](#the-three-roles).
 
 ### 2. Start it
 
@@ -141,8 +142,9 @@ exist, find nothing wrong with it, and exit zero.
 `giro account` is the only way to set account policy, and that is deliberate:
 see [What has no HTTP API](#what-has-no-http-api).
 
-`giro migrate` reads `GIRO_MIGRATE_DATABASE_URL` in preference to
-`DATABASE_URL`, so the owner's credential stays out of the serving environment.
+Every command reads `DATABASE_URL`. `giro migrate` is the one that needs the
+role owning the tables, so it is run as its own step with that role in the
+environment — see [The three roles](#the-three-roles).
 
 ---
 
@@ -435,6 +437,70 @@ describes one of its movements.
 requires the tables to be exactly what the replay produces, which is what makes
 "the log is the source of truth" a fact rather than an intention — and every
 other check reads the projection, so a consistent lie passes them all.
+
+---
+
+## The three roles
+
+Every invariant in giro is a Postgres trigger or constraint, and **a table's
+owner may switch its own triggers off.** So the role the service connects as
+decides whether the guards are enforcement or documentation. Three roles, each
+with one job:
+
+| Role | Logs in | Owns the tables | For |
+|---|---|---|---|
+| the owner *(you, or a deploy user)* | yes | **yes** | `giro migrate`. Nothing else. |
+| `giro_app` | **no** | no | Holds the privileges. `select`, `insert`, and `update` on named columns — no `delete`, no `truncate`, no `alter`. |
+| `giro_service` | yes | no | What the service connects as. Owns nothing itself and inherits only what `giro_app` has. |
+
+`giro_app` cannot log in, so nothing connects as it; it exists to be the single
+place the grants are written. `giro_service` is a member of it and is what a
+connection string points at. Splitting them means adding a privilege is one
+`grant` rather than an audit of every credential in your deployment.
+
+```bash
+just db-app-role     # creates both, idempotent
+```
+
+### One variable, two environments
+
+Every command reads `DATABASE_URL`, and nothing else. The separation between
+migrating and serving lives in the **environment**, not in the variable name:
+
+```bash
+# the service, and the scheduled jobs
+DATABASE_URL=postgres://giro_service@localhost:5432/giro
+
+# the migration step — its own job, its own environment
+DATABASE_URL=postgres://giro_owner@localhost:5432/giro  giro migrate up
+```
+
+A second variable name would not stop a deployment putting the owner in both,
+and it costs every operator one more thing to get right. What actually catches
+the mistake is `giro serve` checking at boot whether the connection it was
+handed can disable its own guards, and saying so if it can.
+
+### Checking it rather than believing it
+
+```
+$ just privileges
+ current_user | superuser | owns_tables | can_append | can_erase | can_rewrite
+--------------+-----------+-------------+------------+-----------+-------------
+ giro_service | f         | f           | t          | f         | f
+```
+
+`owns_tables f` is the one that matters: it is the difference between a guard
+and a comment. `can_erase` and `can_rewrite` false are why the log is append
+only against raw SQL and not merely against the application.
+
+The test suite runs twice, once as the owner and once with `GIRO_TEST_ROLE=giro_app`
+(`just check` does both). The tests that skip under the second run are exactly
+the ones that must damage the book to prove a guard catches it — they cannot
+run as a role unable to do the damage.
+
+`giro account` and `giro verify` both work as `giro_service`; neither needs the
+owner. If a command of yours does, that is worth knowing before it is in a
+deployment.
 
 ---
 

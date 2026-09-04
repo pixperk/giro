@@ -26,7 +26,7 @@ _migrate CMD:
 
 # apply migrations to the test database
 migrate-test:
-    @GIRO_MIGRATE_DATABASE_URL="$GIRO_TEST_DATABASE_URL" go run ./cmd/giro migrate up
+    @DATABASE_URL="$GIRO_TEST_DATABASE_URL" go run ./cmd/giro migrate up
 
 # --- api ---
 

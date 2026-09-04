@@ -16,19 +16,21 @@ import (
 // the migration advisory lock is session scoped, and releasing it on a
 // different pooled connection silently returns false and does nothing, leaving
 // the lock held until that connection happens to close.
-// GIRO_MIGRATE_DATABASE_URL wins over DATABASE_URL, because migrating and
-// serving want different roles. migrations need the one that owns the tables;
-// serving should hold a role that cannot alter them. keeping the owner's
-// credential out of the serving environment is the whole point of separating
-// them, and it only works if the two are read from different places.
+// one variable, DATABASE_URL, read the same way by every command.
+//
+// migrating and serving do want different roles: migrations need the one that
+// owns the tables, and serving must hold one that cannot alter them. that
+// separation lives in the environment rather than in the variable name. the
+// migration step is its own job with its own environment, and giving it a
+// second name would not stop a deployment putting the owner in both -- while
+// costing every operator a variable to get right. giro serve warns at boot if
+// the connection it was handed can disable its own guards, which is the check
+// that actually catches the mistake.
 func migrateURL() (string, error) {
-	if url := os.Getenv("GIRO_MIGRATE_DATABASE_URL"); url != "" {
-		return url, nil
-	}
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		return url, nil
 	}
-	return "", fmt.Errorf("neither GIRO_MIGRATE_DATABASE_URL nor DATABASE_URL is set, " +
+	return "", fmt.Errorf("DATABASE_URL is not set, " +
 		"for example postgres://user@localhost:5432/giro")
 }
 

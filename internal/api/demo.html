@@ -196,8 +196,15 @@ button.run:hover:not(:disabled) { border-color: var(--green); background: #1B312
 .pane { background: var(--card); padding: 1.35rem; min-width: 0; }
 .console > .pane:first-child { border-radius: 5px 0 0 5px; }
 .console > .pane:last-child  { border-radius: 0 5px 5px 0; }
-/* the two columns are near enough the same height that neither needs to
-   follow the other. */
+/* The scenario list is taller than the readout, and a person scrolls down it
+   to reach the later buttons. Without this, clicking one at the bottom updates
+   a trace several hundred pixels above the viewport, and the button looks
+   broken. The pane itself stretches so its background still fills the column;
+   the sticky element is inside it. */
+.readout-inner {
+  position: sticky; top: 3.6rem;
+  max-height: calc(100vh - 4.6rem); overflow-y: auto;
+}
 .pane-title {
   font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--muted); margin: 0 0 1rem; display: flex; justify-content: space-between; align-items: baseline;
@@ -360,6 +367,7 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
   background-attachment: local, local, scroll, scroll; }
 @media (max-width: 58rem) {
   .console { grid-template-columns: 1fr; }
+  .readout-inner { position: static; max-height: none; }
   .console > .pane:first-child { border-radius: 5px 5px 0 0; }
   .console > .pane:last-child  { border-radius: 0 0 5px 5px; }
   .panes { grid-template-columns: 1fr; }
@@ -470,6 +478,7 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
       </div>
 
       <div class="pane readout">
+        <div class="readout-inner">
         <p class="pane-title"><span>What just happened</span><span id="conservation"></span></p>
         <pre class="trace" id="trace">Create a ledger to begin.</pre>
 
@@ -482,6 +491,7 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
             <p class="pane-title"><span>Hash chained log</span></p>
             <div id="chain"><p class="note" style="margin:0">nothing yet</p></div>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -625,9 +635,9 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
           <figcaption><span class="lang">shell</span><span class="where">three commands and a running ledger</span></figcaption>
 <pre class="snippet"><span class="sh">$</span> <span class="f">go get</span> github.com/pixperk/giro
 
-<span class="c"># the schema. directly, never through a pooler:</span>
-<span class="c"># a session advisory lock means nothing behind one.</span>
-<span class="sh">$</span> <span class="f">giro migrate up</span>
+<span class="c"># the schema, as the role that owns the tables. directly, never</span>
+<span class="c"># through a pooler: a session lock means nothing behind one.</span>
+<span class="sh">$</span> DATABASE_URL=$OWNER_URL <span class="f">giro migrate up</span>
 <span class="out">applied 11 migration(s) in 46ms</span>
 
 <span class="c"># a role that cannot disable its own guards</span>
@@ -747,7 +757,8 @@ tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.<
       <div>
         <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">A trigger the owner can turn off is a comment</h3>
         <p>A table's owner may disable its triggers. So if the serving process connects as the role that owns the schema, every rule above is advisory &mdash; correct, documented, and one <code>alter table</code> away from gone.</p>
-        <p><code>just db-app-role</code> creates <code>giro_app</code>: column-scoped grants, ownership of nothing, membership in nothing. It can move money and it cannot change the rules money moves under.</p>
+        <p><code>just db-app-role</code> creates <code>giro_app</code>, which holds column-scoped grants and cannot log in, and <code>giro_service</code>, which logs in and inherits them. Between them: they can move money and cannot change the rules money moves under.</p>
+        <p class="note" style="margin-top:.9rem"><code>just privileges</code> asks the database rather than the config. <code>owns_tables f</code> is the line that matters &mdash; it is the difference between a guard and a comment.</p>
         <p class="note">The test suite runs twice, once as the owner and once as <code>giro_app</code>. The tests that skip under the second run are exactly the ones that have to damage the book to prove a guard catches it &mdash; they cannot run as a role that is unable to do the damage.</p>
       </div>
       <div>
@@ -961,8 +972,9 @@ tx<span class="p">,</span> err <span class="p">:=</span> store<span class="p">.<
       </div>
       <div>
         <h3>Connect as a role that cannot alter a table</h3>
-        <p>A table's owner outranks its own triggers, so serving as the owner makes every guard advisory. <code>just db-app-role</code> creates a role with no privileges of its own that inherits only what the application needs.</p>
-        <p><code>giro serve</code> warns at boot if it can disable its own guards, and refuses to start against a schema it does not match.</p>
+        <p>A table's owner outranks its own triggers, so serving as the owner makes every guard advisory. Three roles, each with one job: <b>the owner</b> migrates and nothing else; <b><code>giro_app</code></b> cannot log in and exists to hold the grants; <b><code>giro_service</code></b> logs in, owns nothing, and inherits only what the application needs. <code>just db-app-role</code> creates both.</p>
+        <p>One variable, two environments. Everything reads <code>DATABASE_URL</code>; the migration step is its own job and runs with the owner in <em>its</em> environment, so the owner's credential is never present where requests are served.</p>
+        <p><code>giro serve</code> warns at boot if it can disable its own guards, and refuses to start against a schema it does not match. <code>just privileges</code> asks the database what the serving connection can actually do rather than trusting the config.</p>
       </div>
       <div>
         <h3>Behind a transaction pooler</h3>

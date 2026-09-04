@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51 the operator surface.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface.
 
 ---
 
@@ -727,9 +727,9 @@ and Postgres saw one session. A third client then released a lock it had never
 taken. Every call returned success.
 
 That lock is the only thing stopping two deploys migrating at once, so through
-a pooler that protection is not weakened, it is absent. `GIRO_MIGRATE_DATABASE_URL`
-exists for this, and the release check now names pooling as the likely cause
-when it fires.
+a pooler that protection is not weakened, it is absent. Migrating is therefore
+its own step with its own environment, pointed at Postgres directly, and the
+release check names pooling as the likely cause when it fires.
 
 **Condition two: the pooler must support prepared statements.** With
 `max_prepared_statements = 0`, giro fails in the middle of the money path with
@@ -1160,3 +1160,35 @@ how an operator stops the bleeding, and refusing it would leave the only remedy
 blocked by the thing it remedies — so the command says at the time that the
 account now breaks its own rule, and that `giro verify` will report it until
 something moves.
+
+---
+
+### D52. One connection variable, separated by environment
+
+Migrating and serving want different roles (D36): migrations need the one that
+owns the tables, and serving must hold one that cannot alter them, because a
+table's owner can switch off its own triggers.
+
+That was originally two variables, `DATABASE_URL` and `GIRO_MIGRATE_DATABASE_URL`,
+so that the owner's credential need never appear in the serving environment. It
+is now one, read the same way by every command, with the migration step run as
+its own job with the owner in *its* environment.
+
+The second name did not buy what it looked like it bought. Nothing stops a
+deployment putting the owner in both variables, so the guarantee was never
+structural — it was a convention with a longer name. Meanwhile it cost every
+operator a variable to get right, and a fallback (`GIRO_MIGRATE_DATABASE_URL`
+in preference to `DATABASE_URL`) that silently preferred whichever the
+developer happened to have exported.
+
+That fallback was not theoretical. The CLI tests set `DATABASE_URL` to an
+isolated schema and nothing else, so on any machine configured the way the
+README described, `migrate up` inside a test ran against the developer's real
+database while the assertions looked at the empty schema. It surfaced only when
+the machine was finally configured as documented — a test suite that passed
+because the split was *not* being used.
+
+What actually catches a misconfigured deployment is the boot check: `giro serve`
+asks the database whether the connection it was handed can disable its own
+guards, and says so if it can. That works whatever the variable is called, and
+it is the check worth having.

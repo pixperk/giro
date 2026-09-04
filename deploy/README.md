@@ -164,6 +164,34 @@ DATABASE_URL=postgres://giro_service@db:5432/giro
 It writes one `verification_runs` row per check, which the application role is
 granted and cannot delete.
 
+`giro_service` is a login role that owns nothing and inherits its privileges
+from `giro_app`. It cannot `alter table`, which is what stops it switching off
+the triggers that enforce the ledger's invariants — a table's owner can, so a
+process connected as the owner has guards that are documentation rather than
+enforcement. `just db-app-role` creates both; the full model is in the
+[README](../README.md#the-three-roles).
+
+Every command reads `DATABASE_URL` and nothing else, so the owner is separated
+by *which environment it appears in*, not by a second variable name:
+
+```bash
+# the service, and this scheduled job
+DATABASE_URL=postgres://giro_service@db:5432/giro
+
+# the migration step only — a deploy job, an init container, a release task
+DATABASE_URL=postgres://giro_owner@db:5432/giro
+```
+
+Keep those two environments apart and the owner's credential is never present
+where requests are served. `giro serve` warns at boot if the connection it was
+handed can disable its own guards, which is what catches it when they are not.
+
+`giro account` also reads `DATABASE_URL` and also needs no more than the
+restricted role, so whatever runs `giro verify` on a schedule can run it too.
+Setting account policy is [deliberately not an
+endpoint](../README.md#what-has-no-http-api), which means a deployment serving
+giro still needs some path to a shell — a task runner, a job, a release step.
+
 ---
 
 ## What to page on, and what to look at in the morning
