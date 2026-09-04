@@ -168,7 +168,18 @@ func releaseAdvisoryLock(ctx context.Context, conn *pgx.Conn) error {
 		return fmt.Errorf("release advisory lock: %w", err)
 	}
 	if !released {
-		return errors.New("advisory lock was not held at release")
+		// the likeliest cause is not a bug here. a session advisory lock
+		// belongs to a backend, and a transaction pooler hands a different
+		// backend to each statement, so the unlock can land somewhere that
+		// never took it.
+		//
+		// that matters more than the leaked lock it leaves behind: through
+		// such a pooler this lock provides no mutual exclusion at all. two
+		// deploys can both "acquire" it, because they are the same backend as
+		// far as postgres is concerned, and both proceed to migrate.
+		return errors.New("advisory lock was not held at release. " +
+			"if this connection goes through a transaction pooler, that is the cause, " +
+			"and migrations must connect to postgres directly instead")
 	}
 	return nil
 }

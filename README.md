@@ -953,7 +953,48 @@ It reads insertion order rather than effective dates: the question is when this
 ledger last recorded something happening, not when it happened. Measured at
 2.8 ms over 200,500 moves, on the index the read path already has.
 
-### D38. Going below zero is a permission on a row, not a name
+### D38. giro runs behind a transaction pooler, with two conditions
+
+Tested against PgBouncer 1.25 in transaction mode rather than reasoned about,
+because the deployment target pools that way and the failures are all silent.
+
+**The runtime is fine.** 200 concurrent commits through the pooler: no errors,
+zero retries, conservation intact. It takes no session advisory locks, no temp
+tables and no `LISTEN`/`NOTIFY`, which is what a transaction pooler punishes.
+
+**Condition one: migrations must connect directly.** Not "should". The
+migration advisory lock is session scoped, and through a transaction pooler two
+different clients both acquired it, because they shared one server connection
+and Postgres saw one session. A third client then released a lock it had never
+taken. Every call returned success.
+
+That lock is the only thing stopping two deploys migrating at once, so through
+a pooler that protection is not weakened, it is absent. `GIRO_MIGRATE_DATABASE_URL`
+exists for this, and the release check now names pooling as the likely cause
+when it fires.
+
+**Condition two: the pooler must support prepared statements.** With
+`max_prepared_statements = 0`, giro fails in the middle of the money path with
+`prepared statement "stmtcache_..." already exists`.
+
+No pgx setting rescues it. `simple_protocol` and `exec` send parameters as
+text, and the `json` columns then fail to parse. `describe_exec` still uses an
+unnamed prepared statement, which the pooler can move a connection out from
+under. So this is a requirement on the pooler and not something the client can
+work around.
+
+PgBouncer has supported it since 1.21 and defaults to 200. The deployment
+target documents the same default, so the condition is met there rather than
+merely likely to be.
+
+**And never `SET ROLE` behind one.** PgBouncer runs its reset query only in
+session mode by default, so session state survives and leaks: a client that set
+a role left it behind, and the next unrelated client on that connection
+inherited it. The restricted role therefore comes from **membership at login**
+(D36), which is a property of the authenticated role rather than session state,
+and survives multiplexing because there is nothing to survive.
+
+### D39. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be
