@@ -49,10 +49,10 @@ func testStore(t *testing.T) (context.Context, *storage.Store, *pgxpool.Pool) {
 
 	admin, err := pgxpool.New(ctx, url)
 	if err != nil {
-		t.Skipf("no test database: %v", err)
+		skipNoDatabase(t, err)
 	}
 	if _, err := admin.Exec(ctx, "drop schema if exists "+schema+" cascade"); err != nil {
-		t.Skipf("no test database: %v", err)
+		skipNoDatabase(t, err)
 	}
 	if _, err := admin.Exec(ctx, "create schema "+schema); err != nil {
 		t.Fatal(err)
@@ -264,4 +264,23 @@ func assertConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 			t.Errorf("asset %s drifted by %s", asset, drift)
 		}
 	}
+}
+
+// skipNoDatabase reports that these tests need a database, and refuses to
+// let that be silent where it matters.
+//
+// Every test here is an integration test: with no database they all skip, the
+// suite exits zero, and CI goes green having asserted nothing. That is the
+// same failure giro itself is built to catch -- a detector that stopped
+// running looks exactly like a book with nothing wrong -- and it applies to
+// the detector as much as to the ledger.
+//
+// So skipping stays the friendly default for a laptop with no Postgres, and
+// CI sets GIRO_TEST_REQUIRE_DATABASE=1 to turn it into a failure.
+func skipNoDatabase(tb testing.TB, err error) {
+	tb.Helper()
+	if os.Getenv("GIRO_TEST_REQUIRE_DATABASE") != "" {
+		tb.Fatalf("no test database, and GIRO_TEST_REQUIRE_DATABASE is set: %v", err)
+	}
+	tb.Skipf("no test database: %v", err)
 }

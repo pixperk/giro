@@ -63,10 +63,23 @@ func serveCommand(ctx context.Context, args []string) error {
 	}
 	warnIfPrivileged(ctx, pool)
 
+	// These routes move money and authenticate nothing, so say so at boot
+	// rather than in a document somebody may not have read. Reaching this port
+	// is equivalent to holding a database credential.
+	fmt.Println("  note  no authentication. keep this port on a private network,")
+	fmt.Println("        behind whatever already terminates auth for your services.")
+
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           api.NewServer(func(name string) *storage.Store { return storage.New(pool, name) }),
+		Addr:    addr,
+		Handler: api.NewServer(func(name string) *storage.Store { return storage.New(pool, name) }),
+
+		// ReadHeaderTimeout alone leaves a connection able to dribble a body
+		// forever; the others bound the rest of the exchange. Generous, because
+		// a commit waits on row locks and a slow one is not an attack.
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

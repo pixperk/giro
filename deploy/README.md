@@ -194,6 +194,25 @@ giro still needs some path to a shell — a task runner, a job, a release step.
 
 ---
 
+## Before you expose anything: there is no authentication
+
+`giro serve` authenticates nothing. Every route is open to anyone who can reach
+the port, and those routes move money. **Reaching giro is equivalent to holding
+a database credential.**
+
+- Bind it to a private network. Never a public interface, never an ingress
+  without auth in front of it.
+- Put it behind whatever already terminates authentication for your other
+  services, and authorise there — giro does not know who your users are.
+- If you would rather not defend that boundary, embed it as a library instead.
+  Then there is no port at all.
+
+The database role split protects the *book* from the application (see
+[The three roles](../README.md#the-three-roles)). It does nothing about who is
+allowed to talk to the application, and nothing in giro does.
+
+---
+
 ## Before any of this matters: recovery
 
 [**RECOVERY.md**](RECOVERY.md) is the one to read before you need it.

@@ -16,7 +16,7 @@ func brokenServer(t *testing.T) *Server {
 	t.Helper()
 	pool, err := pgxpool.New(context.Background(), testURL())
 	if err != nil {
-		t.Skipf("no test database: %v", err)
+		skipNoDatabase(t, err)
 	}
 	pool.Close()
 	return NewServer(func(name string) *storage.Store { return storage.New(pool, name) })

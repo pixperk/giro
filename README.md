@@ -264,6 +264,26 @@ GET    /v1/ledgers/{ledger}/balances                 ?prefix=users:
 GET    /v1/ledgers/{ledger}/logs                     the audit trail
 ```
 
+### There is no authentication
+
+**`giro serve` authenticates nothing.** Every route above is open to anyone who
+can reach the port, and the routes above move money.
+
+That is a deliberate scope decision rather than an omission, and it has the
+same shape as the rest of [what has no HTTP API](#what-has-no-http-api): giro
+does not know who your users are, what a session means in your product, or
+which of them may touch which ledger. Guessing would produce an authorisation
+model you would have to work around.
+
+So it is your gateway's job. Run it on a private network, behind whatever
+already terminates auth for your other services, and never expose the port.
+Treat reaching giro as equivalent to holding a database credential, because it
+is.
+
+If you would rather not have that boundary to defend at all, **embed it as a
+library** — then there is no port, and the only thing that can commit a
+transaction is your own code.
+
 Outside the versioned API:
 
 ```

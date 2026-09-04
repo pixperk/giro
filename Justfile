@@ -65,15 +65,15 @@ bench COUNT="200x":
 # nothing runs is one that compiles against a version of the engine it has not
 # seen in months.
 test:
-    go test -race ./...
-    cd obs && go test -race ./...
+    @GIRO_TEST_REQUIRE_DATABASE=1 go test -race ./...
+    @cd obs && go test -race ./...
 
 # the suite as the restricted application role, which is how it runs in
 # production. everything that is an application path must pass. the ones that
 # skip are those that have to damage the book to prove the damage is noticed,
 # and under this role they cannot stage their attack.
 test-restricted:
-    GIRO_TEST_ROLE=giro_app go test -race ./storage/
+    @GIRO_TEST_ROLE=giro_app GIRO_TEST_REQUIRE_DATABASE=1 go test -race ./storage/
 
 # replay a property test failure. the seed is printed by every run, and CI
 # prints it too, so a failure carries its own reproduction.

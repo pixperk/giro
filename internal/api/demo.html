@@ -584,6 +584,17 @@ nav.top .brand { font-family: var(--serif); font-size: 1.05rem; color: var(--ink
 
     <div class="split" style="margin-top:2.5rem">
       <div>
+        <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">There is no authentication</h3>
+        <p><code>giro serve</code> authenticates nothing. Every route above is open to anyone who can reach the port, and those routes move money. <b>Reaching giro is equivalent to holding a database credential.</b></p>
+        <p>That is a scope decision with the same shape as everything else here: giro does not know who your users are, what a session means in your product, or which of them may touch which ledger. Guessing would produce an authorisation model you would have to work around.</p>
+        <p>So it is your gateway's job. Private network, behind whatever already terminates auth for your other services. Or embed it as a library, and then there is no port at all.</p>
+        <p class="note">The database role split protects the book from the application. It says nothing about who is allowed to talk to the application.</p>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="split" style="margin-top:2.5rem">
+      <div>
         <h3 style="font-family:var(--serif);font-weight:400;font-size:1.3rem;margin:0 0 .6rem">One transaction, in full</h3>
         <figure class="code" id="try">
           <figcaption><span class="lang">http</span><span class="where">alice pays bob $125.00, and the platform $5.00</span>
