@@ -879,7 +879,67 @@ surfaces as `relation does not exist` rather than a permission error when the
 schema `usage` grant is the one missing, which reads like a missing table and
 is not.
 
-### D37. Going below zero is a permission on a row, not a name
+### D37. Money in flight lives in a holding account, not in a status column
+
+A wire is submitted at two and confirmed at six. Posting it at submission means
+the books are wrong for four hours if it bounces; posting it at settlement
+means the payer's balance shows money that has already gone, and they can spend
+it twice. Both are the same mistake: one event recording two.
+
+So it moves into a holding account and out again.
+
+```
+submitted   client:acme                 -> pending:wire:WR-2026-0142
+settled     pending:wire:WR-2026-0142   -> external:bank:infinitus:USD
+returned    pending:wire:WR-2026-0142   -> client:acme
+```
+
+This needs nothing from the engine. It is a naming convention, and three
+properties fall out of what is already here:
+
+- **The payer cannot spend it.** It genuinely left their account, so the
+  balance guard is what stops them. No new mechanism.
+- **Total value in transit is one prefix read.** A status would be something to
+  filter; a balance is something to read.
+- **It cannot be settled twice.** The holding account holds the amount exactly
+  once, so a second settlement overdraws an account nobody permitted and is
+  refused. A partial settlement works naturally: move part, the rest stays.
+
+**Rejected: a status column on the transaction.** It is what most systems do
+and one of them is instructive. The ledger this borrows from has
+`pending`/`settled` on every leg, and the status does not affect balances at
+all: the trigger accumulates every leg regardless, so a pending leg is already
+spendable. It is a label, not a mechanism, which is why their own notes say
+"reserve now, settle later" is not expressible.
+
+A status would also need a mutable money table, and after D35 there is no such
+thing.
+
+**Rejected: pending balances in the engine.** TigerBeetle carries
+`debits_pending` separately from `debits_posted`, with post, void and an
+expiry. It is the stronger model and it is the right one for card
+authorisation, where the money has not moved and merely must not be spendable.
+That is a different problem from money in flight, where the money genuinely has
+left, and it would be a schema change, a second conservation story and a second
+verifier for a capability this business does not have.
+
+**What the convention does not give you is a timeout**, and that is the one
+thing worth building. A wire that neither settles nor returns leaves money in
+the holding account indefinitely, and every check passes while it does:
+conservation holds, the chain is intact, the projection agrees. Nothing is
+wrong with the arithmetic, which is exactly why nothing notices.
+
+`StaleBalances(ctx, prefix, olderThan)` is the answer, and it is deliberately
+not named after holds. It reports money sitting still under a prefix, so the
+same call finds dormant client accounts and an operating account that should
+have returned to zero. The engine keeps its position of having no opinion about
+what an address means.
+
+It reads insertion order rather than effective dates: the question is when this
+ledger last recorded something happening, not when it happened. Measured at
+2.8 ms over 200,500 moves, on the index the read path already has.
+
+### D38. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be
