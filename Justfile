@@ -47,6 +47,18 @@ serve:
 
 # --- development ------------------------------------------------------------
 
+# sustained load, with latency percentiles and the invariants checked after.
+#
+# not part of "just check": these take minutes. pass a duration to soak, for
+# example "just load 60s", which also enables the leak check.
+load DURATION="5s":
+    @GIRO_LOAD={{ DURATION }} go test -run TestLoad -v -timeout 30m ./storage/
+
+# the per-operation benchmarks, which answer a different question to the above:
+# what one commit costs with nothing else happening.
+bench COUNT="200x":
+    @go test -bench . -benchtime {{ COUNT }} -run '^$' ./storage/
+
 # run every test with the race detector.
 #
 # obs is a separate module, so ./... does not reach it. a nested module that

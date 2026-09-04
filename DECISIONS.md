@@ -434,15 +434,32 @@ Measured on a laptop against local postgres:
 
 | | |
 |---|---|
-| one caller, one ledger | about 1,200 transactions per second |
-| sixteen callers, one ledger | about 1,200 per second, and zero retries |
+| one caller, one ledger | about 1,100 transactions per second |
+| sixteen callers, one ledger | about the same, and zero retries |
 | sixteen callers, eight ledgers | about 3,100 per second |
-| batch of fifty against fifty singles | roughly twice the throughput |
+| sixteen callers, hot account, p99 | around 600ms, with a tail beyond a second |
+| batch of fifty against fifty singles | **no faster.** see below |
 
 The flat line from one caller to sixteen is the design working as described,
 not a bottleneck to be tuned away. Throughput scales by adding ledgers, which
 is one reason multiple ledgers exist. Zero retries under contention means the
 lock ordering is holding: transactions queue rather than deadlock.
+
+**The number that matters to a caller is the tail, not the throughput.** Flat
+throughput under rising concurrency means the queue is getting longer, and the
+p99 is what standing in it costs: a few milliseconds at one caller, around
+600ms at sixteen on a hot account, with a tail beyond a second. An API in front
+of this needs a timeout that accommodates that, and a hot account is the thing
+to split when it does not.
+
+**Batching is not a throughput lever, and this table used to claim it was.**
+The earlier entry said roughly twice; measured fairly -- each arm against its
+own store, so neither inherits the other's table size -- it is 0.88x under
+contention and 0.84x uncontended. It pays the ledger row lock once instead of
+fifty times, but it holds that lock for fifty transactions' worth of work, and
+those cancel. What batching is actually for is **atomicity**: fifty postings
+that must all land or none, as one log entry. Reach for it when that is what
+you need, not to go faster.
 
 ### D31. The write path reads a snapshot rather than summing history
 

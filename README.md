@@ -596,6 +596,20 @@ deployment.
 | `just privileges` | What the serving connection can actually do |
 | `just db-sweep` | Drop test schemas an interrupted run left behind |
 | `just replay SEED` | Reproduce a property test failure from its printed seed |
+| `just load [30s]` | Sustained load with latency percentiles, and the invariants checked after |
+| `just bench` | What one commit costs with nothing else happening |
+
+**Know your tail, not your throughput.** `just load` runs sustained scenarios
+and reports p50/p95/p99 alongside the rate. Throughput on one ledger is flat
+from 1 caller to 32 — that is the serialisation working — so rising concurrency
+lengthens the queue rather than the rate, and the p99 is what standing in it
+costs. On a hot account at sixteen callers that is around 600ms with a tail
+beyond a second, which your timeouts have to accommodate.
+
+Every scenario ends by verifying conservation, the hash chain and the
+projection: throughput that arrives with a broken invariant is not throughput.
+Retries must be zero — deadlocks are supposed to be impossible, so anything
+else means the lock ordering broke, and the harness fails on it.
 
 **Record the position hourly.** `giro verify && giro recover tip` prints
 `main:4291:3f4W…`. Ship it wherever your logs go. A restore takes every table
