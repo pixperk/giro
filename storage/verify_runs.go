@@ -83,6 +83,7 @@ func (s *Store) Verify(ctx context.Context, opts VerifyOptions) ([]CheckResult, 
 		{"projection", s.VerifyProjection},
 		{"effective_volumes", s.VerifyEffectiveVolumes},
 		{"balance_permissions", s.VerifyBalancePermissions},
+		{"closed_accounts", s.VerifyClosedAccounts},
 	}
 
 	results := make([]CheckResult, 0, len(checks)+1)

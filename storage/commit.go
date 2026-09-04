@@ -183,6 +183,9 @@ func (s *Store) applyTransaction(ctx context.Context, tx pgx.Tx, p ledger.Postin
 		updates = p.VolumeUpdates()
 	}
 
+	if err := checkClosed(before, updates); err != nil {
+		return nil, alloc, err
+	}
 	if err := checkBalances(before, updates); err != nil {
 		return nil, alloc, err
 	}
@@ -358,4 +361,31 @@ type UnboundedSweepError struct {
 func (e *UnboundedSweepError) Error() string {
 	return fmt.Sprintf("%s is permitted a negative balance in %s, so it holds no determinate amount to move",
 		e.Account, e.Asset)
+}
+
+// checkClosed rejects a transaction touching an account that has been closed,
+// in either direction.
+//
+// Both directions, because a closed account holds nothing and closing requires
+// it to be empty, so the only thing a payment into one could do is give it a
+// balance nobody is watching. An operator with a reason reopens it, moves the
+// money, and closes it again: three deliberate acts that leave a trail, rather
+// than a hole in the guard that quietly makes closure mean less than it says.
+func checkClosed(before map[key]locked, updates []ledger.VolumeUpdate) error {
+	for _, u := range updates {
+		if before[key{u.Account, u.Asset}].closed {
+			return &AccountClosedError{Account: u.Account}
+		}
+	}
+	return nil
+}
+
+// AccountClosedError is returned when a posting names an account that has been
+// closed.
+type AccountClosedError struct {
+	Account ledger.Address
+}
+
+func (e *AccountClosedError) Error() string {
+	return fmt.Sprintf("%s is closed and accepts no further movement; reopen it first", e.Account)
 }

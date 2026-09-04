@@ -1127,7 +1127,49 @@ whole outside world and a contra account is a running total of a cost. Neither
 holds a determinate amount, so "everything it has" is not a number, and picking
 one and calling it the balance would be worse than refusing.
 
-### D42. Going below zero is a permission on a row, not a name
+### D42. An account can be closed, and must be empty to be
+
+A client offboards and their account carries on working. A payment made by
+mistake a year later is as welcome as one made on the first day, and nothing in
+the ledger records that the relationship ended.
+
+`CloseAccount` refuses further movement **in both directions**, and requires
+the account to hold nothing first.
+
+**The emptiness rule is what stops closure stranding money.** An account closed
+with a balance would hold it somewhere nothing accepts postings, and getting it
+out would need exactly the thing closure forbids. Requiring it empty removes
+that by construction rather than by a special case in the guard. A bank does
+the same.
+
+**Both directions, for the same reason.** A closed account holds nothing, so
+the only thing an incoming posting could do is give it a balance nobody is
+watching.
+
+Money that arrives afterwards is handled by reopening. A wire that bounces back
+after the client left is refused, stays in its holding account, and an operator
+reopens, pays it out, and closes again: three deliberate acts that leave a
+trail, rather than a hole that quietly makes closure mean less than it says.
+
+**On `accounts`, not `accounts_volumes`,** unlike the negative-balance
+permission, and the difference is not arbitrary. Permission to go below zero is
+a fact about an account in one asset, since a cost line in USD is an ordinary
+balance in USDT. Closure is a fact about the relationship, and per asset it
+would have a hole: an account closed in `USD/2` would still accept `USDT/6`.
+
+**The closure check is not locked, on purpose.** Closing locks the balance rows
+it can see, which stops a commit already in flight and not one starting a
+moment later. Refusing that would mean every commit taking a lock on the
+account row, and a lock on a row the write path also updates is the shape that
+deadlocks — the same reason there is no foreign key to `ledgers` (D14). So the
+race is left open deliberately and `VerifyClosedAccounts` looks for it, which
+is the same trade as D37.
+
+The guard on `accounts` names the columns that may change, so this column had
+to be declared there before it could be written. That is the allow list working
+as intended: a new column arrives protected rather than unprotected.
+
+### D43. Going below zero is a permission on a row, not a name
 
 An account that spends money it does not have is the failure a ledger exists to
 prevent, so the balance guard refuses it. Two kinds of account have to be

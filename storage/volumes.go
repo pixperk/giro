@@ -28,6 +28,10 @@ type key struct {
 type locked struct {
 	ledger.Volumes
 	allowNegative bool
+	// the account is closed, so it accepts nothing in either direction. a fact
+	// about the address rather than the (address, asset) row, read here so the
+	// commit path does not need a second query or a second lock for it.
+	closed bool
 }
 
 // pgx has no native mapping between numeric and *big.Int. pgtype.Numeric
@@ -140,7 +144,51 @@ func (s *Store) lockVolumes(ctx context.Context, tx pgx.Tx, updates []ledger.Vol
 		}
 	}
 
+	// closure last, and by account rather than by (account, asset), because
+	// that is what it is a fact about. joining it onto the select above would
+	// answer for the pairs that came back and leave the ones filled in below
+	// unanswered, and an account closed in one asset accepting another is
+	// exactly the hole this is meant not to have.
+	//
+	// deliberately not locked. a lock on the accounts row taken by every
+	// commit is the same shape as the foreign key to ledgers that had to be
+	// removed for deadlocking, so an account closed concurrently with a commit
+	// is left to VerifyClosedAccounts instead.
+	closed, err := s.closedAmong(ctx, tx, addresses)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range current {
+		if closed[k.account] {
+			v.closed = true
+			current[k] = v
+		}
+	}
 	return current, nil
+}
+
+// which of these addresses are closed. one indexed lookup against the partial
+// index, so it costs a seek rather than a scan of every account ever opened.
+func (s *Store) closedAmong(ctx context.Context, tx pgx.Tx, addresses []string) (map[ledger.Address]bool, error) {
+	rows, err := tx.Query(ctx, `
+		select address from accounts
+		 where ledger = $1 and closed
+		   and address = any($2::text[])`,
+		s.ledger, addresses)
+	if err != nil {
+		return nil, fmt.Errorf("read closed accounts: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[ledger.Address]bool{}
+	for rows.Next() {
+		var a ledger.Address
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out[a] = true
+	}
+	return out, rows.Err()
 }
 
 // applyVolumes adds the deltas. relative, never absolute: the database

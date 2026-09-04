@@ -13,12 +13,19 @@ func TestVerifyRunsEveryCheckOnAHealthyLedger(t *testing.T) {
 	ctx, s, _ := testStore(t)
 	fund(t, ctx, s, "users:alice", 10000)
 
+	// a closed account too. like the conversions check, this one examines
+	// nothing on a ledger where nobody has closed anything, and a check with
+	// nothing to examine is not evidence of anything.
+	if err := s.CloseAccount(ctx, "client:departed"); err != nil {
+		t.Fatal(err)
+	}
+
 	results, err := s.Verify(ctx, VerifyOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions"}
+	want := []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions", "closed_accounts"}
 	// exactly the engine's own checks. anything a layer above contributes
 	// arrives through Extra rather than being built in, which is what keeps
 	// the engine from having to know what those checks mean.
@@ -99,7 +106,7 @@ func TestRecordingMakesSilenceDetectable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions"} {
+	for _, name := range []string{"conservation", "log", "projection", "effective_volumes", "balance_permissions", "closed_accounts"} {
 		at, ok := after[name]
 		if !ok {
 			t.Errorf("%s did not record that it ran", name)
