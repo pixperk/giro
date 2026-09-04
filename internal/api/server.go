@@ -12,16 +12,64 @@ import (
 )
 
 type Server struct {
+	// see AllowUnkeyedWrites. false means a write without an Idempotency-Key
+	// is refused.
+	allowUnkeyed bool
+
 	mux *http.ServeMux
 	// resolves a ledger name to a store scoped to it. the name is never a
 	// parameter to a query, only an input to constructing the store.
 	store func(ledger string) *storage.Store
 }
 
-func NewServer(store func(ledger string) *storage.Store) *Server {
+// AllowUnkeyedWrites lets a write arrive without an Idempotency-Key.
+//
+// Off by default, and that default is the point. A connection severed after
+// the server has committed but before the client hears about it leaves the
+// caller unable to tell whether the payment landed -- a property of networks,
+// not a bug. The only remedy is a key the caller can retry under, and the
+// fault-injection tests exist to prove it works. A ledger that accepts an
+// unkeyed write is a ledger that will eventually pay somebody twice.
+//
+// It exists at all because a caller may be doing its own deduplication
+// upstream, and that is a decision somebody should make out loud rather than
+// arrive at by not setting a header.
+func AllowUnkeyedWrites() func(*Server) { return func(s *Server) { s.allowUnkeyed = true } }
+
+func NewServer(store func(ledger string) *storage.Store, opts ...func(*Server)) *Server {
 	s := &Server{mux: http.NewServeMux(), store: store}
+	for _, o := range opts {
+		o(s)
+	}
 	s.routes()
 	return s
+}
+
+// requireKey refuses a write that carries no Idempotency-Key, and says why.
+//
+// A 400 rather than a warning: the request has not happened yet, so refusing
+// it costs the caller a retry with a header. Accepting it costs them a
+// duplicate payment on the day their network misbehaves, and they will not
+// find out until reconciliation.
+func (s *Server) requireKey(w http.ResponseWriter, r *http.Request) bool {
+	if s.allowUnkeyed || r.Header.Get("Idempotency-Key") != "" {
+		return true
+	}
+	// A dry run runs the whole commit path and rolls it back, so there is
+	// nothing to duplicate and a lost response costs nothing but asking again.
+	// Demanding a key there would be friction with no safety behind it.
+	if r.URL.Query().Get("dryRun") == "true" {
+		return true
+	}
+	writeJSON(w, http.StatusBadRequest, Error{
+		Code: IDEMPOTENCYKEYREQUIRED,
+		Message: "this endpoint moves money and requires an Idempotency-Key header. " +
+			"a connection lost after the commit but before the response leaves you unable " +
+			"to tell whether it landed, and retrying under the same key is the only way to " +
+			"find out without paying twice. start the server with --allow-unkeyed-writes " +
+			"if you deduplicate upstream.",
+	})
+	return false
 }
 
 // the patterns match the paths in api/openapi.yaml exactly. go 1.22 ServeMux

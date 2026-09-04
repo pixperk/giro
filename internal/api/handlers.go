@@ -33,6 +33,9 @@ func (s *Server) getLedger(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
+	if !s.requireKey(w, r) {
+		return
+	}
 	params, ok := query(w, r)
 	if !ok {
 		return
@@ -468,6 +471,9 @@ func optionalDate(w http.ResponseWriter, params url.Values, name string) (*time.
 }
 
 func (s *Server) commitBatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireKey(w, r) {
+		return
+	}
 	params, ok := query(w, r)
 	if !ok {
 		return

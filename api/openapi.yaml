@@ -182,9 +182,22 @@ paths:
           schema: { type: boolean, default: false }
         - name: Idempotency-Key
           in: header
+          required: true
           description: |
-            Replaying this key returns the original transaction rather than
-            creating a second one.
+            Required. Replaying this key returns the original transaction
+            rather than creating a second one.
+
+            This is not a convenience. A connection lost after the server has
+            committed but before you receive the response leaves you unable to
+            tell whether the transaction landed, which is a property of
+            networks rather than a bug. Retrying under the same key is the only
+            way to find out without paying twice.
+
+            Not required when dryRun=true: that runs the whole commit path and
+            rolls it back, so there is nothing to duplicate.
+
+            Start the server with --allow-unkeyed-writes to accept writes
+            without one, if you deduplicate upstream.
 
             The key is stored with a hash of the request body. Reusing a key
             with different inputs is an error rather than a silent success for
@@ -242,9 +255,12 @@ paths:
           schema: { type: boolean, default: false }
         - name: Idempotency-Key
           in: header
+          required: true
           description: |
-            Covers the whole batch. Replaying it returns the transactions the
-            first attempt created rather than committing them again.
+            Required, and covers the whole batch. Replaying it returns the
+            transactions the first attempt created rather than committing them
+            again. See the same header on POST /transactions for why it is not
+            optional.
           schema: { type: string, maxLength: 256 }
       requestBody:
         required: true
@@ -950,6 +966,7 @@ components:
             - CONFLICT
             - INSUFFICIENT_FUNDS
             - IDEMPOTENCY_MISMATCH
+            - IDEMPOTENCY_KEY_REQUIRED
             - INTERNAL
         message: { type: string }
         details:

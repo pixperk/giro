@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,19 +21,36 @@ import (
 const serveUsage = `usage:
   giro serve [addr]     listen address, default :8080
 
+  --allow-unkeyed-writes
+        accept a transaction with no Idempotency-Key. off by default: a
+        connection lost after the commit but before the response leaves the
+        caller unable to tell whether it landed, and retrying without a key
+        pays twice. only set this if you deduplicate upstream.
+
 reads DATABASE_URL from the environment.
 `
 
 func serveCommand(ctx context.Context, args []string) error {
 	addr := ":8080"
-	switch {
-	case len(args) > 1:
-		return usageErr{serveUsage}
-	case len(args) == 1:
-		if args[0] == "-h" || args[0] == "--help" {
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "-h" || a == "--help":
 			return usageErr{serveUsage}
+		case a == "--allow-unkeyed-writes":
+			// consumed by serverOptions
+		case strings.HasPrefix(a, "-"):
+			return usageErr{fmt.Sprintf("unknown flag %q\n\n%s", a, serveUsage)}
+		default:
+			positional = append(positional, a)
 		}
-		addr = args[0]
+	}
+	switch len(positional) {
+	case 0:
+	case 1:
+		addr = positional[0]
+	default:
+		return usageErr{serveUsage}
 	}
 
 	url := os.Getenv("DATABASE_URL")
@@ -63,6 +81,8 @@ func serveCommand(ctx context.Context, args []string) error {
 	}
 	warnIfPrivileged(ctx, pool)
 
+	newStore := func(name string) *storage.Store { return storage.New(pool, name) }
+
 	// These routes move money and authenticate nothing, so say so at boot
 	// rather than in a document somebody may not have read. Reaching this port
 	// is equivalent to holding a database credential.
@@ -71,7 +91,7 @@ func serveCommand(ctx context.Context, args []string) error {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: api.NewServer(func(name string) *storage.Store { return storage.New(pool, name) }),
+		Handler: api.NewServer(newStore, serverOptions(args)...),
 
 		// ReadHeaderTimeout alone leaves a connection able to dribble a body
 		// forever; the others bound the rest of the exchange. Generous, because
@@ -167,4 +187,23 @@ func warnIfPrivileged(ctx context.Context, pool *pgxpool.Pool) {
 			"  the database guards can be disabled by this connection, so they are\n"+
 			"  advisory here. serve as a role with no privileges of its own that is a\n"+
 			"  member of giro_app instead. see: just db-app-role\n", user)
+}
+
+// serverOptions turns the flags that change how the API behaves into options.
+//
+// --allow-unkeyed-writes is the only one, and it is off by default because a
+// write with no Idempotency-Key cannot be safely retried: a connection lost
+// after the commit but before the response leaves the caller unable to tell
+// what happened, and retrying then pays twice. Turning it off is a decision
+// somebody should make out loud.
+func serverOptions(args []string) []func(*api.Server) {
+	var opts []func(*api.Server)
+	for _, a := range args {
+		if a == "--allow-unkeyed-writes" {
+			opts = append(opts, api.AllowUnkeyedWrites())
+			fmt.Println("  note  --allow-unkeyed-writes: a write with no Idempotency-Key")
+			fmt.Println("        cannot be retried safely. deduplicate upstream.")
+		}
+	}
+	return opts
 }

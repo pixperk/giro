@@ -264,6 +264,39 @@ GET    /v1/ledgers/{ledger}/balances                 ?prefix=users:
 GET    /v1/ledgers/{ledger}/logs                     the audit trail
 ```
 
+### Every write needs an Idempotency-Key
+
+`POST /transactions` and `POST /transactions/bulk` **require** an
+`Idempotency-Key` header. Without one they return `400
+IDEMPOTENCY_KEY_REQUIRED`.
+
+This is not a convenience, and it is required rather than recommended for the
+same reason everything else here is a default rather than a note. A connection
+lost after the server has committed but before you receive the response leaves
+you unable to tell whether the transaction landed. That window cannot be
+closed — it is a property of networks, not a bug — so the only remedy is a key
+you can retry under, and giro's [fault-injection tests](storage/chaos_test.go)
+exist to prove the remedy works: a connection severed at a random point, a
+retry under the same key, and exactly one transaction every time.
+
+A ledger that accepts an unkeyed write is a ledger that will eventually pay
+somebody twice, on the day their network misbehaves, and nobody will find out
+until reconciliation.
+
+```bash
+curl -X POST $L/transactions   -H 'Content-Type: application/json'   -H 'Idempotency-Key: inv-2291'   -d '{"postings": [...]}'
+```
+
+Use the identifier the payment already has — an invoice number, a wire
+reference, your own request id. Replaying the key returns the original
+transaction; replaying it with *different* postings is an error, because that
+is a bug rather than a retry.
+
+`?dryRun=true` needs no key: it commits nothing, so there is nothing to
+duplicate. And `giro serve --allow-unkeyed-writes` turns the requirement off,
+for a caller that deduplicates upstream — which is then a decision somebody
+made out loud rather than one they arrived at by not setting a header.
+
 ### There is no authentication
 
 **`giro serve` authenticates nothing.** Every route above is open to anyone who

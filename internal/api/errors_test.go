@@ -140,19 +140,92 @@ func TestLogCarriesTheIdempotencyKey(t *testing.T) {
 	s := newTestServer(t)
 	base := newLedger(t, s, "demo")
 
-	if rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
-		"postings": []map[string]any{posting("world", "users:alice", "USD/2", 100)},
-	}, "Idempotency-Key", "req-abc"); rec.Code != http.StatusCreated {
-		t.Fatal(rec.Body.String())
+	for _, key := range []string{"req-abc", "req-def"} {
+		if rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+			"postings": []map[string]any{posting("world", "users:alice", "USD/2", 100)},
+		}, "Idempotency-Key", key); rec.Code != http.StatusCreated {
+			t.Fatal(rec.Body.String())
+		}
 	}
-	fund(t, s, base, "users:bob", 100) // no key on this one
 
 	page := decode[LogPage](t, do(t, s, http.MethodGet, base+"/logs", nil))
-	if page.Items[0].IdempotencyKey == nil || *page.Items[0].IdempotencyKey != "req-abc" {
-		t.Errorf("first entry key = %v, want req-abc", page.Items[0].IdempotencyKey)
+	for i, want := range []string{"req-abc", "req-def"} {
+		got := page.Items[i].IdempotencyKey
+		if got == nil || *got != want {
+			t.Errorf("entry %d key = %v, want %s", i, got, want)
+		}
 	}
-	if page.Items[1].IdempotencyKey != nil {
-		t.Errorf("second entry has a key it was never given: %v", page.Items[1].IdempotencyKey)
+}
+
+// A write with no Idempotency-Key is refused, and this is the reason.
+//
+// A connection lost after the server commits but before the client hears
+// leaves the caller unable to tell whether the payment landed. That window
+// cannot be closed -- it is a property of networks -- so the only remedy is a
+// key the caller can retry under. The fault-injection tests in storage prove
+// the remedy works; this makes sure a caller cannot skip it by accident.
+func TestAWriteWithoutAnIdempotencyKeyIsRefused(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+	body := map[string]any{
+		"postings": []map[string]any{posting("world", "users:alice", "USD/2", 100)},
+	}
+
+	for _, path := range []string{base + "/transactions", base + "/transactions/bulk"} {
+		t.Run(path, func(t *testing.T) {
+			payload := body
+			if strings.HasSuffix(path, "/bulk") {
+				payload = map[string]any{"transactions": []map[string]any{body}}
+			}
+			rec := do(t, s, http.MethodPost, path, payload, "Idempotency-Key", "")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			got := decode[Error](t, rec)
+			if got.Code != IDEMPOTENCYKEYREQUIRED {
+				t.Errorf("code = %s, want %s", got.Code, IDEMPOTENCYKEYREQUIRED)
+			}
+			// the message has to say what to do, not just what is missing
+			if !strings.Contains(got.Message, "Idempotency-Key") {
+				t.Errorf("message does not name the header: %s", got.Message)
+			}
+		})
+	}
+
+	// and nothing was written
+	page := decode[LogPage](t, do(t, s, http.MethodGet, base+"/logs", nil))
+	if len(page.Items) != 0 {
+		t.Errorf("%d log entries after refused writes", len(page.Items))
+	}
+}
+
+// A dry run commits nothing, so there is nothing to duplicate and a lost
+// response costs only asking again. Requiring a key there would be friction
+// with no safety behind it.
+func TestADryRunNeedsNoIdempotencyKey(t *testing.T) {
+	s := newTestServer(t)
+	base := newLedger(t, s, "demo")
+
+	rec := do(t, s, http.MethodPost, base+"/transactions?dryRun=true", map[string]any{
+		"postings": []map[string]any{posting("world", "users:alice", "USD/2", 100)},
+	}, "Idempotency-Key", "")
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want a dry run to be accepted: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The escape hatch, for a caller that deduplicates upstream. It exists so that
+// running without keys is a decision somebody made out loud rather than one
+// they arrived at by not setting a header.
+func TestUnkeyedWritesCanBeAllowedDeliberately(t *testing.T) {
+	s := newTestServer(t, AllowUnkeyedWrites())
+	base := newLedger(t, s, "demo")
+
+	rec := do(t, s, http.MethodPost, base+"/transactions", map[string]any{
+		"postings": []map[string]any{posting("world", "users:alice", "USD/2", 100)},
+	}, "Idempotency-Key", "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -34,7 +34,7 @@ func testURL() string {
 	return "postgres://" + os.Getenv("USER") + "@localhost:5432/giro_test"
 }
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T, opts ...func(*Server)) *Server {
 	t.Helper()
 	ctx := context.Background()
 
@@ -79,11 +79,26 @@ func newTestServer(t *testing.T) *Server {
 		}
 	})
 
-	return NewServer(func(name string) *storage.Store { return storage.New(pool, name) })
+	return NewServer(func(name string) *storage.Store { return storage.New(pool, name) }, opts...)
 }
 
 // do issues a request and returns the recorder. body may be nil, a string, or
 // anything json marshalable.
+// nextKey gives every write in the suite a distinct idempotency key, so tests
+// stay independent of each other.
+var nextKey atomic.Int64
+
+// the two endpoints that move money, and the only ones that require a key
+func isWrite(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	return strings.HasSuffix(path, "/transactions") || strings.HasSuffix(path, "/transactions/bulk")
+}
+
 func do(t *testing.T, s *Server, method, path string, body any, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -103,7 +118,20 @@ func do(t *testing.T, s *Server, method, path string, body any, headers ...strin
 
 	req := httptest.NewRequest(method, path, reader)
 	req.Header.Set("Content-Type", "application/json")
+
+	// A write carries an Idempotency-Key unless the test is about not having
+	// one. The tests model the client a caller should write rather than the
+	// smallest request the server will accept -- and the server refuses an
+	// unkeyed write for a reason worth keeping in front of whoever reads
+	// these.
+	if isWrite(method, path) {
+		req.Header.Set("Idempotency-Key", fmt.Sprintf("test-%d", nextKey.Add(1)))
+	}
 	for i := 0; i+1 < len(headers); i += 2 {
+		if headers[i+1] == "" {
+			req.Header.Del(headers[i]) // an explicit empty value clears it
+			continue
+		}
 		req.Header.Set(headers[i], headers[i+1])
 	}
 

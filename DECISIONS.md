@@ -11,7 +11,7 @@ Read [README.md](README.md) to use giro. This is why it is shaped that way.
 
 **Roughly grouped:** D1–D13 the model, D14–D24 the write path and concurrency,
 D25–D31 reads and performance, D32–D36 the library surface and the guards,
-D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining, D58 the hot account, D59–D60 failure.
+D37–D44 account policy, D45–D50 reconciliation, D51–D52 the operator surface, D53 observability, D54 recovery, D55 latency, D56 the rehearsal, D57 pipelining, D58 the hot account, D59–D61 failure and the client contract.
 
 ---
 
@@ -1592,3 +1592,38 @@ happen today, which is the right way to hold a claim that depends on call
 order.
 
 There are now no panics anywhere in the library packages.
+
+---
+
+### D61. An idempotency key is required, not recommended
+
+The fault-injection work (D59) proved something that had only been assumed: a
+connection severed after the server commits but before the client hears leaves
+the caller unable to tell whether the payment landed, and retrying under the
+same key is what makes that survivable. The tests kill the connection at a
+random point, retry, and get exactly one transaction every time.
+
+The header was optional. A caller who had not read the documentation got a
+ledger that would eventually pay somebody twice, on the day their network
+misbehaved, and would not find out until reconciliation.
+
+So `POST /transactions` and `POST /transactions/bulk` now refuse a request
+without one, with a message that says why rather than only what is missing.
+This is the same rule the rest of giro follows: the safe thing is the default,
+and the unsafe thing requires saying so out loud. `giro serve
+--allow-unkeyed-writes` is the saying-so, for a caller that deduplicates
+upstream, and it prints a warning at boot.
+
+Two carve-outs. `?dryRun=true` needs no key, because it runs the whole commit
+path and rolls it back -- there is nothing to duplicate, and demanding a key
+would be friction with no safety behind it. And the library keeps it optional:
+an embedded caller may be in the same process, where there is no network to
+sever.
+
+The requirement also matters beyond the write path. Re-applying the gap after a
+restore (D54, D56) works precisely because the original requests carried keys.
+A deployment that skips them has a recovery procedure whose fifth step is
+"reconcile by hand".
+
+The demo page sends a key on every write for the same reason it does everything
+else live: a demonstration that skipped it would be teaching the wrong client.

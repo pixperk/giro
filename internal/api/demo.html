@@ -1134,8 +1134,17 @@ async function call(method, path, body, headers = {}) {
   return { ok: res.ok, status: res.status, body: text ? JSON.parse(text) : null };
 }
 
-const post = (postings, opts = {}) =>
-  call("POST", base() + "/transactions", Object.assign({ postings }, opts));
+/* Every write carries a key, because the server requires one and because a
+   demo that skipped it would be teaching the wrong client. A connection lost
+   after the commit but before the response leaves a caller unable to tell
+   whether it landed; retrying under the same key is the only way to find out
+   without paying twice. */
+let keySeq = 0;
+const newKey = () => "demo-" + Date.now().toString(36) + "-" + (++keySeq);
+
+const post = (postings, opts = {}, key = newKey()) =>
+  call("POST", base() + "/transactions", Object.assign({ postings }, opts),
+       { "Idempotency-Key": key });
 
 /* Every scenario has to stand on its own, because a reader clicks them in
    whatever order they are curious about. These two top up what a step needs
@@ -1262,8 +1271,7 @@ const SCENARIOS = {
     say("note", "and retried must not pay carol twice.");
     for (const attempt of ["first", "retry"]) {
       say("note", attempt + ", Idempotency-Key: " + key);
-      await call("POST", base() + "/transactions",
-        { postings: [P("users:alice", "users:carol", "USD/2", 2500)] }, { "Idempotency-Key": key });
+      await post([P("users:alice", "users:carol", "USD/2", 2500)], {}, key);
     }
     say("note", "same transaction id both times. one movement of money.");
   },

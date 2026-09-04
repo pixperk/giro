@@ -12,18 +12,21 @@ import (
 
 // Defines values for ErrorCode.
 const (
-	CONFLICT            ErrorCode = "CONFLICT"
-	IDEMPOTENCYMISMATCH ErrorCode = "IDEMPOTENCY_MISMATCH"
-	INSUFFICIENTFUNDS   ErrorCode = "INSUFFICIENT_FUNDS"
-	INTERNAL            ErrorCode = "INTERNAL"
-	NOTFOUND            ErrorCode = "NOT_FOUND"
-	VALIDATION          ErrorCode = "VALIDATION"
+	CONFLICT               ErrorCode = "CONFLICT"
+	IDEMPOTENCYKEYREQUIRED ErrorCode = "IDEMPOTENCY_KEY_REQUIRED"
+	IDEMPOTENCYMISMATCH    ErrorCode = "IDEMPOTENCY_MISMATCH"
+	INSUFFICIENTFUNDS      ErrorCode = "INSUFFICIENT_FUNDS"
+	INTERNAL               ErrorCode = "INTERNAL"
+	NOTFOUND               ErrorCode = "NOT_FOUND"
+	VALIDATION             ErrorCode = "VALIDATION"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
 func (e ErrorCode) Valid() bool {
 	switch e {
 	case CONFLICT:
+		return true
+	case IDEMPOTENCYKEYREQUIRED:
 		return true
 	case IDEMPOTENCYMISMATCH:
 		return true
@@ -450,13 +453,22 @@ type CreateTransactionParams struct {
 	// was created.
 	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
 
-	// IdempotencyKey Replaying this key returns the original transaction rather than
-	// creating a second one.
+	// IdempotencyKey Required. Replaying this key returns the original transaction
+	// rather than creating a second one.
+	//
+	// This is not a convenience. A connection lost after the server has
+	// committed but before you receive the response leaves you unable to
+	// tell whether the transaction landed, which is a property of
+	// networks rather than a bug. Retrying under the same key is the only
+	// way to find out without paying twice.
+	//
+	// Start the server with --allow-unkeyed-writes to accept writes
+	// without one, if you deduplicate upstream.
 	//
 	// The key is stored with a hash of the request body. Reusing a key
 	// with different inputs is an error rather than a silent success for
 	// a payment that never happened.
-	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // CommitBatchParams defines parameters for CommitBatch.
@@ -464,9 +476,11 @@ type CommitBatchParams struct {
 	// DryRun Run the whole batch and roll back, returning what would have happened.
 	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
 
-	// IdempotencyKey Covers the whole batch. Replaying it returns the transactions the
-	// first attempt created rather than committing them again.
-	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+	// IdempotencyKey Required, and covers the whole batch. Replaying it returns the
+	// transactions the first attempt created rather than committing them
+	// again. See the same header on POST /transactions for why it is not
+	// optional.
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // SetAccountMetadataJSONRequestBody defines body for SetAccountMetadata for application/json ContentType.

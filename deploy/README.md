@@ -194,6 +194,23 @@ giro still needs some path to a shell — a task runner, a job, a release step.
 
 ---
 
+## The one thing to tell whoever writes a client
+
+**Every write must carry an `Idempotency-Key`.** giro refuses one without it.
+
+A connection lost after the server commits but before the response arrives
+leaves the caller unable to tell whether the payment landed. That window is a
+property of networks and cannot be closed; a key the caller can retry under is
+the only remedy, and it is also the thing
+[recovery](RECOVERY.md) depends on — re-applying a gap after a restore works
+because the original requests had keys.
+
+Use the identifier the payment already has: an invoice number, a wire
+reference, your own request id. Not a UUID generated at send time, which
+changes on every retry and defeats the purpose.
+
+---
+
 ## Before you expose anything: there is no authentication
 
 `giro serve` authenticates nothing. Every route is open to anyone who can reach
